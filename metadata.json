@@ -1,0 +1,7 @@
+{
+  "name": "Sucata Fácil Enterprise v3.0",
+  "description": "Plataforma SaaS corporativa para gestão de reciclagem com multi-empresa, controle financeiro avançado e PDV operacional.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
