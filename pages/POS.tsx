@@ -214,25 +214,82 @@ const POS: React.FC = () => {
     if (!activeSession) return [];
     const items: { id: string, label: string, group: 'ENTRADA' | 'SAIDA' | 'FISICO' | 'ENTRADA_INFO' | 'SAIDA_INFO' }[] = [];
 
-    // GRUPO FISICO (Afectam o saldo Real/Diferença)
+    // GRUPO FISICO (Mantém inalterado - sempre presente)
     items.push({ id: 'physical_cash', label: 'DINHEIRO EM MÃOS', group: 'FISICO' });
     items.push({ id: 'physical_check', label: 'CHEQUE EM MÃOS', group: 'FISICO' });
 
-    // GRUPO ENTRADAS INFO
-    items.push({ id: 'info_pix', label: 'PIX (INFO)', group: 'ENTRADA_INFO' });
-    items.push({ id: 'info_cards', label: 'CARTÕES (INFO)', group: 'ENTRADA_INFO' });
-    items.push({ id: 'info_boletos', label: 'BOLETOS (INFO)', group: 'ENTRADA_INFO' });
-    items.push({ id: 'info_transfer', label: 'TRANSFERÊNCIA (INFO)', group: 'ENTRADA_INFO' });
-    items.push({ id: 'info_cash_in', label: 'ENTRADA EM DINHEIRO (INFO)', group: 'ENTRADA_INFO' });
+    // Buscar todos os registros financeiros deste turno
+    const shiftRecords = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === activeSession.id);
 
-    // GRUPO SAIDAS INFO
-    items.push({ id: 'info_withdrawals', label: 'SANGRIAS (INFO)', group: 'SAIDA_INFO' });
-    items.push({ id: 'info_expenses', label: 'DESPESAS GERAIS (INFO)', group: 'SAIDA_INFO' });
-    items.push({ id: 'info_deposit', label: 'DEPÓSITO (INFO)', group: 'SAIDA_INFO' });
-    items.push({ id: 'info_payments', label: 'PAGAMENTOS (INFO)', group: 'SAIDA_INFO' });
+    // Categorias excluídas
+    const excludedCategories = ['Compra de Materiais', 'Venda de Materiais'];
+
+    // Processar categorias únicas por natureza
+    const categoryMap = new Map<string, { natureza: string, total: number }>();
+
+    shiftRecords.forEach(rec => {
+      // Validações de segurança
+      if (!rec.categoria || !rec.natureza) return;
+      if (excludedCategories.includes(rec.categoria)) return;
+
+      const key = `cat_${rec.categoria}_${rec.natureza}`;
+      const existing = categoryMap.get(key);
+      if (existing) {
+        existing.total += rec.valor;
+      } else {
+        categoryMap.set(key, { natureza: rec.natureza, total: rec.valor });
+      }
+    });
+
+    // Processar payment terms únicos por natureza
+    const termMap = new Map<string, { natureza: string, total: number }>();
+
+    shiftRecords.forEach(rec => {
+      // Pular se não tem payment_term_id
+      if (!rec.payment_term_id && !rec.paymentTermId) return;
+
+      const termId = rec.payment_term_id || rec.paymentTermId;
+      const term = allTerms && allTerms.length > 0 ? allTerms.find(t => t.id === termId || t.uuid === termId) : null;
+
+      if (!term) return;
+
+      // Excluir À VISTA (DINHEIRO)
+      if (term.name === 'À VISTA (DINHEIRO)' || term.name === 'À VISTA') return;
+
+      // Validação de segurança para natureza
+      if (!rec.natureza) return;
+
+      const key = `term_${term.name}_${rec.natureza}`;
+      const existing = termMap.get(key);
+      if (existing) {
+        existing.total += rec.valor;
+      } else {
+        termMap.set(key, { natureza: rec.natureza, total: rec.valor });
+      }
+    });
+
+    // Adicionar categorias ao array de items
+    categoryMap.forEach((value, key) => {
+      const categoria = key.replace(`cat_`, '').replace(`_${value.natureza}`, '');
+      items.push({
+        id: key,
+        label: categoria.toUpperCase(),
+        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO'
+      });
+    });
+
+    // Adicionar payment terms ao array de items
+    termMap.forEach((value, key) => {
+      const termName = key.replace(`term_`, '').replace(`_${value.natureza}`, '');
+      items.push({
+        id: key,
+        label: `${termName.toUpperCase()}`,
+        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO'
+      });
+    });
 
     return items;
-  }, [activeSession]);
+  }, [activeSession, companyId, allTerms, refreshKey]);
 
   const getStatusInfo = (record: FinancialRecord) => {
     const isCanceled = record.status === 'reversed' || record.is_reversed || record.isReversed;

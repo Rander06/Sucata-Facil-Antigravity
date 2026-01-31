@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
+import { formatBRDate, getBRDateOnly, getTodayBR, getDaysAgoBR } from '../utils/dateHelper';
 import { UserRole, CashierSession, Transaction, FinancialRecord, Partner, Material, User, PaymentTerm, PermissionModule, ActionLog } from '../types';
 import AuthorizationModal from '../components/AuthorizationModal';
 import {
@@ -61,8 +62,10 @@ const Reports: React.FC = () => {
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
 
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [dateStart, setDateStart] = useState(db.getToday());
-  const [dateEnd, setDateEnd] = useState(db.getToday());
+
+  // Default date range: today only
+  const [dateStart, setDateStart] = useState(getTodayBR);
+  const [dateEnd, setDateEnd] = useState(getTodayBR);
 
   const topScrollRef = useRef<HTMLDivElement>(null);
   const headerScrollRef = useRef<HTMLDivElement>(null);
@@ -88,7 +91,17 @@ const Reports: React.FC = () => {
         finData = (cFin || []).map((f: any) => db.normalize(f));
 
         // Fetch Logs
-        const { data: cLog } = await client.from('logs').select('*').eq('company_id', targetId);
+        console.log('[Reports] Buscando logs do Supabase para company_id:', targetId);
+        const { data: cLog, error: logError } = await client.from('logs').select('*').eq('company_id', targetId);
+
+        if (logError) {
+          console.error('[Reports] ERRO ao buscar logs do Supabase:', logError);
+          console.error('[Reports] Código do erro:', logError.code);
+          console.error('[Reports] Mensagem:', logError.message);
+        } else {
+          console.log('[Reports] Logs retornados do Supabase:', cLog?.length || 0);
+        }
+
         logData = (cLog || []).map((l: any) => db.normalize(l));
       } else {
         finData = db.queryTenant<FinancialRecord>('financials', targetId);
@@ -97,8 +110,11 @@ const Reports: React.FC = () => {
 
       setFinancials(finData.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       setLogs(logData.sort((a, b) => new Date(b.created_at || b.timestamp || 0).getTime() - new Date(a.created_at || a.timestamp || 0).getTime()));
+
+      console.log(`[Reports] Carregados ${finData.length} registros financeiros e ${logData.length} logs de auditoria`);
     } catch (err) {
-      console.error("Erro ao carregar relatórios:", err);
+      console.error("[Reports] Erro ao carregar relatórios:", err);
+      console.error("[Reports] Detalhes:", { companyId, isSuperAdmin, hasClient: !!client });
     } finally {
       setIsLoading(false);
     }
@@ -107,6 +123,13 @@ const Reports: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Auto-refresh logs when audit report modal opens
+  useEffect(() => {
+    if (activeModal === 'audit_report') {
+      loadData();
+    }
+  }, [activeModal]);
 
   const handleSyncScroll = (source: 'top' | 'header' | 'table') => {
     const top = topScrollRef.current;
@@ -153,7 +176,7 @@ const Reports: React.FC = () => {
       'USER_EDIT_EXECUTED': 'ALTERAÇÃO ACESSO',
       'BANK_ADD': 'CADASTRO BANCO',
       'BANK_EDIT_EXECUTED': 'AJUSTE DE CONTA',
-      'AUDIT_MASTER_RECONCILIATION': 'AUDITORIA MASTER'
+      'AUDIT_MASTER_RECONCILIATION': 'AUDITORIA DE LOGS'
     };
     return map[action] || action.replace(/_/g, ' ').toUpperCase();
   };
@@ -209,14 +232,48 @@ Valor envolvido: ${val}`;
   }, [financials, filters, dateStart, dateEnd, partners, activeModal]);
 
   const filteredLogs = useMemo(() => {
-    return logs.filter(l => {
-      const lDate = (l.created_at || l.timestamp || '').substring(0, 10);
+    console.log('[Reports] Filtrando logs. Total carregado:', logs.length);
+    console.log('[Reports] Filtro de data:', { dateStart, dateEnd });
+    console.log('[Reports] Primeiros 3 logs (sample):', logs.slice(0, 3).map(l => ({
+      created_at: l.created_at,
+      timestamp: l.timestamp,
+      action: l.action,
+      user_name: l.user_name
+    })));
+
+    // Find logs from today specifically (using BR timezone)
+    const today = getTodayBR();
+    const logsFromToday = logs.filter(l => {
+      const lDate = getBRDateOnly(l.created_at || l.timestamp || '');
+      return lDate === today;
+    });
+    console.log(`[Reports] Logs de HOJE (${today}):`, logsFromToday.length);
+    if (logsFromToday.length > 0) {
+      console.log('[Reports] Exemplos de logs de hoje:', logsFromToday.slice(0, 3).map(l => ({
+        created_at: l.created_at,
+        extractedDate: getBRDateOnly(l.created_at || l.timestamp || ''),
+        action: l.action
+      })));
+    }
+
+    const filtered = logs.filter(l => {
+      const lDate = getBRDateOnly(l.created_at || l.timestamp || '');
       const matchDate = lDate >= dateStart && lDate <= dateEnd;
       const matchUser = !filters.log_user || (l.user_name || '').toLowerCase().includes(filters.log_user.toLowerCase());
       const matchAction = !filters.log_action || (l.action || '').toLowerCase().includes(filters.log_action.toLowerCase());
       const matchDetail = !filters.log_detail || (l.details || '').toLowerCase().includes(filters.log_detail.toLowerCase());
+
+      // Log specifically for today's logs that don't match
+      if (lDate === today && !matchDate) {
+        console.log('[Reports] ⚠️ Log de HOJE filtrado:', { lDate, dateStart, dateEnd, matchDate, log: l });
+      }
+
       return matchDate && matchUser && matchAction && matchDetail;
     });
+
+    console.log('[Reports] Logs após filtro:', filtered.length);
+    console.log('[Reports] Logs de hoje após filtro:', filtered.filter(l => getBRDateOnly(l.created_at || l.timestamp || '') === today).length);
+    return filtered;
   }, [logs, filters, dateStart, dateEnd]);
 
   const filteredMaterialsReport = useMemo(() => {
@@ -242,11 +299,11 @@ Valor envolvido: ${val}`;
 
   const reportItems = [
     { id: 'financial_statement', label: 'Extrato Geral', description: 'Consolidado de movimentações', icon: ArrowLeftRight, color: 'green' },
-    { id: 'receivables_mirror', label: 'Espelho: Receber', description: 'Vendas e títulos de entrada', icon: ArrowUpCircle, color: 'blue' },
-    { id: 'payables_mirror', label: 'Espelho: Pagar', description: 'Compras e títulos de saída', icon: ArrowDownCircle, color: 'red' },
-    { id: 'inventory_report', label: 'Inventário Real', description: 'Saldos e projeção de pátio', icon: Package, color: 'yellow' },
-    { id: 'partners_report', label: 'Relatório Base', description: 'Filtro avançado de parceiros', icon: UsersIcon, color: 'indigo' },
-    { id: 'audit_report', label: 'Auditoria Master', description: 'Histórico narrativo de segurança', icon: HistoryIcon, color: 'yellow' }
+    { id: 'receivables_mirror', label: 'Contas a Receber', description: 'Vendas e títulos de entrada', icon: ArrowUpCircle, color: 'blue' },
+    { id: 'payables_mirror', label: 'Contas a Pagar', description: 'Compras e títulos de saída', icon: ArrowDownCircle, color: 'red' },
+    { id: 'inventory_report', label: 'Saldo de Estoque', description: 'Saldos e projeção de pátio', icon: Package, color: 'yellow' },
+    { id: 'partners_report', label: 'Mov. do Parceiros', description: 'Filtro avançado de parceiros', icon: UsersIcon, color: 'indigo' },
+    { id: 'audit_report', label: 'Auditoria de Logs', description: 'Histórico narrativo de segurança', icon: HistoryIcon, color: 'yellow' }
   ];
 
   const getColorClasses = (color: string) => {

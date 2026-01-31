@@ -45,59 +45,43 @@ const FinanceHub: React.FC = () => {
   const [isAuditing, setIsAuditing] = useState(false);
   const auditFormRef = useRef<HTMLFormElement>(null);
 
-  const auditItems = useMemo(() => [
-    { id: 'physical_cash', label: 'DINHEIRO EM MÃOS', group: 'FISICO', icon: Banknote },
-    { id: 'physical_check', label: 'CHEQUE EM MÃOS', group: 'FISICO', icon: Coins },
-    { id: 'info_pix', label: 'PIX', group: 'ENTRADA_INFO', icon: Zap },
-    { id: 'info_cards', label: 'CARTÕES', group: 'ENTRADA_INFO', icon: CreditCard },
-    { id: 'info_boletos', label: 'BOLETOS', group: 'ENTRADA_INFO', icon: FileText },
-    { id: 'info_transfer', label: 'TRANSFERÊNCIA', group: 'ENTRADA_INFO', icon: BankIcon },
-    { id: 'info_cash_in', label: 'ENTRADA EM DINHEIRO', group: 'ENTRADA_INFO', icon: Banknote },
-    { id: 'info_withdrawals', label: 'SANGRIAS', group: 'SAIDA_INFO', icon: ArrowDownCircle },
-    { id: 'info_expenses', label: 'DESPESAS GERAIS', group: 'SAIDA_INFO', icon: AlertTriangle },
-    { id: 'info_deposit', label: 'DEPÓSITO', group: 'SAIDA_INFO', icon: Landmark },
-    { id: 'info_payments', label: 'PAGAMENTOS', group: 'SAIDA_INFO', icon: CheckCircle2 },
-  ], []);
+
+
 
   const getSystemValue = (itemId: string, group: string) => {
     if (!auditModal.session) return 0;
     const session = auditModal.session;
-    const nature: 'ENTRADA' | 'SAIDA' = group === 'SAIDA_INFO' ? 'SAIDA' : 'ENTRADA';
+    const records = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === session.id && f.status !== 'reversed');
 
-    // 1. Meios de Pagamento Específicos (DINHEIRO / CHEQUE)
+    // 1. Campos Físicos (DINHEIRO / CHEQUE)
     if (itemId === 'physical_cash') return db.calculateExpectedValue(companyId, session, 'vista', [], financeCategories, 'ENTRADA');
     if (itemId === 'physical_check') return db.calculateExpectedValue(companyId, session, 'cheque', [], financeCategories, 'ENTRADA');
 
-    // 2. Meios de Pagamento por Nome (PIX, CARTÃO, etc)
-    let termId: string | null = null;
-    const itemsMapping: Record<string, string> = {
-      'info_pix': 'PIX',
-      'info_cards': 'CART',
-      'info_boletos': 'BOLETO',
-      'info_transfer': 'TRANSF',
-    };
+    // 2. Campos Dinâmicos de Categoria (cat_<categoria>_<natureza>)
+    if (itemId.startsWith('cat_')) {
+      const parts = itemId.split('_');
+      const natureza = parts[parts.length - 1]; // Última parte é a natureza
+      const categoria = parts.slice(1, -1).join('_'); // Tudo entre cat_ e _natureza
 
-    if (itemsMapping[itemId]) {
-      const term = allHubTerms.find(t => t.name.toUpperCase().includes(itemsMapping[itemId]));
-      termId = term?.id || term?.uuid || null;
+      return records
+        .filter(f => f.categoria === categoria && f.natureza === natureza)
+        .reduce((sum, r) => sum + r.valor, 0);
     }
 
-    if (termId) return db.calculateExpectedValue(companyId, session, termId, [], financeCategories, nature);
+    // 3. Campos Dinâmicos de Payment Term (term_<nome>_<natureza>)
+    if (itemId.startsWith('term_')) {
+      const parts = itemId.split('_');
+      const natureza = parts[parts.length - 1]; // Última parte é a natureza
+      const termName = parts.slice(1, -1).join('_'); // Tudo entre term_ e _natureza
 
-    // 3. Tipos e Categorias Especiais
-    const records = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === session.id && f.status !== 'reversed');
-
-    if (itemId === 'info_withdrawals') return records.filter(f => String(f.tipo).toLowerCase().includes('sangria')).reduce((sum, r) => sum + r.valor, 0);
-    if (itemId === 'info_payments') return records.filter(f => String(f.tipo).toLowerCase().includes('pagament')).reduce((sum, r) => sum + r.valor, 0);
-    if (itemId === 'info_cash_in') return records.filter(f => String(f.tipo).toLowerCase().includes('suprim')).reduce((sum, r) => sum + r.valor, 0);
-
-    const catLabels: Record<string, string> = {
-      'info_expenses': 'Despesas Gerais',
-      'info_deposit': 'Depósito',
-    };
-
-    if (catLabels[itemId]) {
-      return records.filter(f => f.categoria === catLabels[itemId]).reduce((sum, r) => sum + r.valor, 0);
+      return records
+        .filter(f => {
+          const termId = f.payment_term_id || f.paymentTermId;
+          if (!termId) return false;
+          const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
+          return term && term.name === termName && f.natureza === natureza;
+        })
+        .reduce((sum, r) => sum + r.valor, 0);
     }
 
     return 0;
@@ -126,6 +110,7 @@ const FinanceHub: React.FC = () => {
   const [purchasePaymentTerms, setPurchasePaymentTerms] = useState<PaymentTerm[]>([]);
   const [salePaymentTerms, setSalePaymentTerms] = useState<PaymentTerm[]>([]);
   const [allHubTerms, setAllHubTerms] = useState<PaymentTerm[]>([]);
+  const [allPaymentTerms, setAllPaymentTerms] = useState<PaymentTerm[]>([]);
   const [bankManualTerms, setBankManualTerms] = useState<PaymentTerm[]>([]);
 
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -153,6 +138,14 @@ const FinanceHub: React.FC = () => {
   });
   const [auditDateEnd, setAuditDateEnd] = useState(db.getToday());
   const [auditOperatorFilter, setAuditOperatorFilter] = useState('all');
+
+  // Filtros da tabela de movimentações do turno
+  const [auditTransactionFilters, setAuditTransactionFilters] = useState({
+    description: '',
+    status: 'all',
+    paymentTerm: '',
+    nature: 'all'
+  });
 
   const [liquidationModal, setLiquidationModal] = useState<{
     show: boolean;
@@ -232,6 +225,7 @@ const FinanceHub: React.FC = () => {
       setPurchasePaymentTerms(pTerms);
       setSalePaymentTerms(sTerms);
       setAllHubTerms(hTerms);
+      setAllPaymentTerms(allTermsRaw);
       setBankManualTerms(bManualTerms);
       setBanks(allBanks);
       setFinanceCategories(allCategories);
@@ -339,6 +333,91 @@ const FinanceHub: React.FC = () => {
       return c.type === 'both' || c.type === targetFlow;
     });
   }, [financeCategories, walletForm.tipo]);
+
+  /**
+   * @google/genai Senior Frontend Engineer:
+   * Gera dinamicamente os campos de auditoria baseados nas transações reais do turno.
+   * Espelha a lógica do POS.tsx para consistência UX.
+   */
+  const auditItems = useMemo(() => {
+    const session = auditModal.session;
+    if (!session) return [];
+
+    const items: { id: string, label: string, group: 'ENTRADA' | 'SAIDA' | 'FISICO' | 'ENTRADA_INFO' | 'SAIDA_INFO', icon: any }[] = [];
+
+    // GRUPO FISICO (Mantém inalterado - sempre presente)
+    items.push({ id: 'physical_cash', label: 'DINHEIRO EM MÃOS', group: 'FISICO', icon: Banknote });
+    items.push({ id: 'physical_check', label: 'CHEQUE EM MÃOS', group: 'FISICO', icon: Coins });
+
+    // Buscar todos os registros financeiros deste turno
+    const shiftRecords = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === session.id);
+
+    // Categorias excluídas
+    const excludedCategories = ['Compra de Materiais', 'Venda de Materiais'];
+
+    // Processar categorias únicas por natureza
+    const categoryMap = new Map<string, { natureza: string, total: number }>();
+
+    shiftRecords.forEach(rec => {
+      if (excludedCategories.includes(rec.categoria)) return;
+
+      const key = `cat_${rec.categoria}_${rec.natureza}`;
+      const existing = categoryMap.get(key);
+      if (existing) {
+        existing.total += rec.valor;
+      } else {
+        categoryMap.set(key, { natureza: rec.natureza, total: rec.valor });
+      }
+    });
+
+    // Processar payment terms únicos por natureza
+    const termMap = new Map<string, { natureza: string, total: number }>();
+
+    shiftRecords.forEach(rec => {
+      // Pular se não tem payment_term_id
+      if (!rec.payment_term_id && !rec.paymentTermId) return;
+
+      const termId = rec.payment_term_id || rec.paymentTermId;
+      const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
+
+      if (!term) return;
+
+      // Excluir À VISTA (DINHEIRO)
+      if (term.name === 'À VISTA (DINHEIRO)' || term.name === 'À VISTA') return;
+
+      const key = `term_${term.name}_${rec.natureza}`;
+      const existing = termMap.get(key);
+      if (existing) {
+        existing.total += rec.valor;
+      } else {
+        termMap.set(key, { natureza: rec.natureza, total: rec.valor });
+      }
+    });
+
+    // Adicionar categorias ao array de items
+    categoryMap.forEach((value, key) => {
+      const categoria = key.replace(`cat_`, '').replace(`_${value.natureza}`, '');
+      items.push({
+        id: key,
+        label: categoria.toUpperCase(),
+        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO',
+        icon: value.natureza === 'ENTRADA' ? ArrowUpCircle : ArrowDownCircle
+      });
+    });
+
+    // Adicionar payment terms ao array de items
+    termMap.forEach((value, key) => {
+      const termName = key.replace(`term_`, '').replace(`_${value.natureza}`, '');
+      items.push({
+        id: key,
+        label: `${termName.toUpperCase()}`,
+        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO',
+        icon: CreditCard
+      });
+    });
+
+    return items;
+  }, [auditModal.session, companyId, allPaymentTerms]);
 
   const handleWalletManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -486,13 +565,13 @@ const FinanceHub: React.FC = () => {
         });
       }
 
-      // 5. Registro de Auditoria Master no Histórico Narrativo de Segurança
+      // 5. Registro de Auditoria do Turno no Histórico Narrativo de Segurança
       await db.logAction(
         companyId,
         currentUser?.id || '',
         currentUser?.name || 'Sistema',
         'AUDIT_MASTER_RECONCILIATION',
-        `OP: Auditoria Master Concluída | CTX: Hub Financeiro | DET: Reconciliação do turno #${session.id.slice(0, 6).toUpperCase()} do operador ${session.user_name || session.userName}. Dinheiro: R$ ${valVista.toFixed(2)}, Cheque: R$ ${valCheque.toFixed(2)}, Total Auditado: R$ ${auditedTotal.toFixed(2)}. Depositado em: ${bankName} | VAL: R$ ${auditedTotal.toFixed(2)}`
+        `OP: Auditoria do Turno Concluída | CTX: Hub Financeiro | DET: Reconciliação do turno #${session.id.slice(0, 6).toUpperCase()} do operador ${session.user_name || session.userName}. Dinheiro: R$ ${valVista.toFixed(2)}, Cheque: R$ ${valCheque.toFixed(2)}, Total Auditado: R$ ${auditedTotal.toFixed(2)}. Depositado em: ${bankName} | VAL: R$ ${auditedTotal.toFixed(2)}`
       );
 
       setAuditModal({ show: false, session: null, bankName: '', auditedBreakdown: {} });
@@ -925,7 +1004,7 @@ const FinanceHub: React.FC = () => {
                     <ShieldCheck size={24} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">Auditoria Master</h2>
+                    <h2 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-3">Auditoria do Turno</h2>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
                       <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1.5"><UserIcon size={12} /> {auditModal.session.userName || auditModal.session.user_name}</span>
                       <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1.5"><Receipt size={12} /> Turno: #{auditModal.session.id.slice(0, 8).toUpperCase()}</span>
@@ -998,9 +1077,9 @@ const FinanceHub: React.FC = () => {
                                   <item.icon size={12} className="text-slate-500" /> {item.label}
                                 </label>
                                 <div className="flex flex-col items-end">
-                                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">Sistema: R$ {systemVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Sistema: R$ {systemVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                                   {Math.abs(diff) > 0.01 && (
-                                    <span className={`text-[8px] font-black uppercase tracking-tighter ${diff > 0 ? 'text-brand-warning' : 'text-brand-error'}`}>
+                                    <span className={`text-[10px] font-black uppercase tracking-tighter ${diff > 0 ? 'text-brand-warning' : 'text-brand-error'}`}>
                                       Dif: {diff > 0 ? '+' : ''} R$ {diff.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                     </span>
                                   )}
@@ -1030,6 +1109,95 @@ const FinanceHub: React.FC = () => {
                   <h3 className="text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2 pb-2 border-b border-slate-800">
                     <ListChecks size={14} className="text-blue-400" /> Movimentações do Turno
                   </h3>
+
+                  {/* Filtros */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Descrição</label>
+                      <input
+                        type="text"
+                        placeholder="Filtrar por descrição..."
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 transition-all"
+                        value={auditTransactionFilters.description}
+                        onChange={e => setAuditTransactionFilters({ ...auditTransactionFilters, description: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Status</label>
+                      <select
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 transition-all"
+                        value={auditTransactionFilters.status}
+                        onChange={e => setAuditTransactionFilters({ ...auditTransactionFilters, status: e.target.value })}
+                      >
+                        <option value="all">TODOS</option>
+                        {(() => {
+                          const uniqueStatuses = new Set<string>();
+                          allFinancialRecords
+                            .filter(r => r.caixa_id === auditModal.session?.id)
+                            .forEach(rec => {
+                              const statusInfo = getStatusInfo(rec);
+                              uniqueStatuses.add(statusInfo.label);
+                            });
+                          return Array.from(uniqueStatuses).sort().map(status => (
+                            <option key={status} value={status.toLowerCase()}>{status}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Meio / Prazo</label>
+                      <select
+                        key={`payment-term-filter-${auditModal.session?.id}`}
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 transition-all"
+                        value={auditTransactionFilters.paymentTerm}
+                        onChange={e => setAuditTransactionFilters({ ...auditTransactionFilters, paymentTerm: e.target.value })}
+                      >
+                        <option value="">TODOS</option>
+                        {(() => {
+                          const uniqueTerms = new Set<string>();
+                          allFinancialRecords
+                            .filter(r => r.caixa_id === auditModal.session?.id)
+                            .forEach(rec => {
+                              const term = allPaymentTerms.find(t => t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
+                              let termName = term?.name || '';
+
+                              // Se não tem payment_term mas tem liquidation_date, é À VISTA
+                              if (!termName && rec.liquidation_date) {
+                                termName = 'À VISTA';
+                              }
+
+                              // Mesclar "À VISTA" com "À VISTA (DINHEIRO)"
+                              if (termName === 'À VISTA') {
+                                termName = 'À VISTA (DINHEIRO)';
+                              }
+
+                              // Só adicionar se tiver um nome válido (não vazio e não ---)
+                              if (termName && termName !== '---') {
+                                uniqueTerms.add(termName);
+                              }
+                            });
+
+                          return Array.from(uniqueTerms).sort().map(termName => (
+                            <option key={termName} value={termName}>{termName}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Natureza</label>
+                      <select
+                        key={`nature-filter-${auditModal.session?.id}`}
+                        className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 transition-all"
+                        value={auditTransactionFilters.nature}
+                        onChange={e => setAuditTransactionFilters({ ...auditTransactionFilters, nature: e.target.value })}
+                      >
+                        <option value="all">TODAS</option>
+                        <option value="ENTRADA">ENTRADA</option>
+                        <option value="SAIDA">SAÍDA</option>
+                      </select>
+                    </div>
+                  </div>
+
                   <div className="enterprise-card overflow-hidden border-slate-800 bg-slate-950/30">
                     <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
                       <table className="w-full text-left border-collapse">
@@ -1046,17 +1214,61 @@ const FinanceHub: React.FC = () => {
                         <tbody className="divide-y divide-slate-800/40">
                           {allFinancialRecords
                             .filter(r => r.caixa_id === auditModal.session?.id)
+                            .filter(rec => {
+                              const statusInfo = getStatusInfo(rec);
+                              const term = allPaymentTerms.find(t => t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
+                              let termName = term?.name || '';
+                              // Se não tem payment_term mas tem liquidation_date, é À VISTA
+                              if (!termName && rec.liquidation_date) {
+                                termName = 'À VISTA';
+                              }
+                              // Normalizar À VISTA para À VISTA (DINHEIRO)
+                              if (termName === 'À VISTA') {
+                                termName = 'À VISTA (DINHEIRO)';
+                              }
+
+                              // Filtro de descrição
+                              const matchDescription = !auditTransactionFilters.description ||
+                                rec.description.toLowerCase().includes(auditTransactionFilters.description.toLowerCase());
+
+                              // Filtro de status (agora comparando com o label em lowercase)
+                              const matchStatus = auditTransactionFilters.status === 'all' ||
+                                statusInfo.label.toLowerCase() === auditTransactionFilters.status;
+
+                              // Filtro de meio/prazo (comparação exata agora)
+                              const matchPaymentTerm = !auditTransactionFilters.paymentTerm ||
+                                termName === auditTransactionFilters.paymentTerm;
+
+                              // Filtro de natureza
+                              const matchNature = auditTransactionFilters.nature === 'all' ||
+                                rec.natureza === auditTransactionFilters.nature;
+
+                              return matchDescription && matchStatus && matchPaymentTerm && matchNature;
+                            })
                             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                             .map(rec => {
                               const statusInfo = getStatusInfo(rec);
                               const partner = partners.find(p => p.id === rec.parceiro_id);
-                              const term = allHubTerms.find(t => t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
+                              const term = allPaymentTerms.find(t => t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
+                              let displayTerm = term?.name || '';
+                              // Se não tem payment_term mas tem liquidation_date, é À VISTA
+                              if (!displayTerm && rec.liquidation_date) {
+                                displayTerm = 'À VISTA';
+                              }
+                              // Normalizar À VISTA para À VISTA (DINHEIRO) na exibição
+                              if (displayTerm === 'À VISTA') {
+                                displayTerm = 'À VISTA (DINHEIRO)';
+                              }
+                              // Se não tem nada, mostrar ---
+                              if (!displayTerm) {
+                                displayTerm = '---';
+                              }
                               return (
                                 <tr key={rec.id} className={`text-[10px] hover:bg-slate-800/40 transition-colors ${statusInfo.isStriked ? 'opacity-40 grayscale line-through' : ''}`}>
                                   <td className="px-4 py-3 font-mono text-slate-500">{new Date(rec.created_at).toLocaleTimeString()}</td>
                                   <td className="px-4 py-3 text-slate-400 font-bold uppercase truncate max-w-[120px]">{partner?.name || '---'}</td>
                                   <td className="px-4 py-3 text-slate-300 font-medium uppercase truncate max-w-xs">{rec.description}</td>
-                                  <td className="px-4 py-3 text-slate-500 font-black uppercase tracking-tighter">{term?.name || (rec.liquidation_date ? 'À VISTA' : '---')}</td>
+                                  <td className="px-4 py-3 text-slate-500 font-black uppercase tracking-tighter">{displayTerm}</td>
                                   <td className={`px-4 py-3 text-right font-black ${rec.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>
                                     {rec.natureza === 'SAIDA' ? '- ' : ''}R$ {rec.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                   </td>
@@ -1097,7 +1309,7 @@ const FinanceHub: React.FC = () => {
                       className="w-full md:w-auto px-12 py-5 bg-brand-warning text-black rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-brand-warning/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3"
                     >
                       {isAuditing ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                      {isAuditing ? 'Efetivando...' : 'Efetivar Auditoria Master'}
+                      {isAuditing ? 'Efetivando...' : 'Efetivar Auditoria do Turno'}
                     </button>
                   ) : (
                     <div className="px-8 py-4 bg-slate-800/50 rounded-xl border border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">

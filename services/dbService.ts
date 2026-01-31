@@ -28,13 +28,10 @@ const generateId = () => {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
+// Returns current timestamp in UTC (ISO 8601 format)
+// This is what Supabase expects for TIMESTAMPTZ columns
 const getBrNow = () => {
-  const now = new Date();
-  const formatter = new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-  return `${formatter.format(now).replace(' ', 'T')}.000Z`;
+  return new Date().toISOString();
 };
 
 const TABLE_MAP: Record<string, string> = {
@@ -362,6 +359,7 @@ export const db = {
       const cloudTable = TABLE_MAP[table as string];
       if (cloudTable) {
         const payload = prepareForCloud(newItem, table as string);
+        console.log(`[DB_INSERT] Salvando em ${cloudTable}:`, payload);
         const { error } = await client.from(cloudTable).insert(payload);
         if (error) {
           console.error(`[CLOUD_INSERT_ERROR] Tabela: ${cloudTable} | Payload:`, payload, "| Erro:", error);
@@ -372,6 +370,8 @@ export const db = {
           } else {
             alert(`Erro ao salvar na nuvem: ${error.message} (Código: ${error.code})`);
           }
+        } else {
+          console.log(`[DB_INSERT] ✅ Salvo com sucesso em ${cloudTable}`);
         }
       }
     }
