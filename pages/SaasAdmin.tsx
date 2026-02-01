@@ -216,20 +216,48 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
   };
 
   const operationalModules = [
+    // Dashboard
     { id: PermissionModule.DASHBOARD, label: 'Dashboard' },
-    { id: PermissionModule.PURCHASES, label: 'Compras' },
-    { id: PermissionModule.SALES, label: 'Vendas' },
-    { id: PermissionModule.FINANCE, label: 'Financeiro' },
-    { id: PermissionModule.STOCK, label: 'Estoque' },
-    { id: PermissionModule.PARTNERS, label: 'Parceiros' },
-    { id: PermissionModule.REPORTS, label: 'Relatórios' },
-    { id: PermissionModule.TEAM, label: 'Equipe' },
+    { id: PermissionModule.REPORTS_VIEW, label: 'Relatórios' },
+    { id: PermissionModule.SUPPORT_VIEW, label: 'Suporte' },
+
+    // Vendas
+    { id: PermissionModule.SALES_VIEW, label: 'Vendas (Ver)' },
+    { id: PermissionModule.SALES_CREATE, label: 'Vendas (Criar)' },
+    { id: PermissionModule.SALES_CLOSE_CASHIER, label: 'Vendas (Fechar Caixa)' },
+
+    // Financeiro
+    { id: PermissionModule.FINANCE_VIEW, label: 'Financeiro (Ver)' },
+    { id: PermissionModule.FINANCE_CREATE, label: 'Financeiro (Criar)' },
+    { id: PermissionModule.FINANCE_EDIT, label: 'Financeiro (Editar)' },
+    { id: PermissionModule.FINANCE_DELETE, label: 'Financeiro (Excluir)' },
+    { id: PermissionModule.FINANCE_LIQUIDATE, label: 'Financeiro (Liquidar)' },
+    { id: PermissionModule.FINANCE_EXTRACT, label: 'Financeiro (Extrato)' },
+
+    // Compras
+    { id: PermissionModule.PURCHASES_VIEW, label: 'Compras (Ver)' },
+    { id: PermissionModule.PURCHASES_CREATE, label: 'Compras (Criar)' },
+    { id: PermissionModule.PURCHASES_EDIT, label: 'Compras (Editar)' },
+    { id: PermissionModule.PURCHASES_DELETE, label: 'Compras (Excluir)' },
+
+    // Estoque
+    { id: PermissionModule.STOCK_VIEW, label: 'Estoque (Ver)' },
+    { id: PermissionModule.STOCK_CREATE, label: 'Estoque (Criar)' },
+    { id: PermissionModule.STOCK_EDIT, label: 'Estoque (Editar)' },
+    { id: PermissionModule.STOCK_DELETE, label: 'Estoque (Excluir)' },
+    { id: PermissionModule.STOCK_ADJUST, label: 'Estoque (Ajuste)' },
+
+    // Outros
+    { id: PermissionModule.PARTNERS_VIEW, label: 'Parceiros (Ver)' },
+    { id: PermissionModule.PARTNERS_CREATE, label: 'Parceiros (Criar)' },
+    { id: PermissionModule.PARTNERS_EDIT, label: 'Parceiros (Editar)' },
+    { id: PermissionModule.PARTNERS_DELETE, label: 'Parceiros (Excluir)' },
+    { id: PermissionModule.TEAM_VIEW, label: 'Equipe (Ver)' },
+    { id: PermissionModule.TEAM_INVITE, label: 'Equipe (Convidar)' },
   ];
 
   const actionPermissions = [
-    { id: PermissionModule.ACTION_EDIT, label: 'Edição de Registros' },
-    { id: PermissionModule.ACTION_DELETE, label: 'Exclusão de Registros' },
-    { id: PermissionModule.ACTION_CLOSE_CASHIER, label: 'Fechamentos e Sangrias' },
+    // Kept for structure but empty as actions are now granular
   ];
 
   return (
@@ -440,7 +468,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
                         <td className="px-6 py-4 w-[15%]">
                           <div className={`flex items-center gap-2 text-xs font-medium ${isExpired ? 'text-brand-error' : 'text-slate-400'}`}>
                             <Calendar size={12} />
-                            {expiryDate ? new Date(expiryDate).toLocaleDateString('pt-BR') : '---'}
+                            {expiryDate ? String(expiryDate).split('T')[0].split('-').reverse().join('/') : '---'}
                             {isExpired && <span className="text-[8px] bg-brand-error/20 px-1 rounded uppercase ml-1 font-black">Vencido</span>}
                           </div>
                         </td>

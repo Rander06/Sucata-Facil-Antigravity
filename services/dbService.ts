@@ -176,6 +176,18 @@ const applyRedundancy = (obj: any) => {
 
 const prepareForCloud = (obj: any, tableKey: string) => {
   if (!obj || typeof obj !== 'object') return obj;
+
+  // BYPASS: Para 'users', enviamos o objeto filtrado pela whitelist (TABLE_COLUMNS) 
+  // para evitar erro de coluna inexistente (ex: camelCase) mas permitir arrays
+  if (['users', 'profiles'].includes(tableKey)) {
+    const clean: any = {};
+    const validCols = TABLE_COLUMNS[tableKey] || [];
+    validCols.forEach(k => {
+      if (obj[k] !== undefined) clean[k] = obj[k];
+    });
+    return clean;
+  }
+
   const cloudObj: any = {};
   const source = applyRedundancy(obj);
   const allowedColumns = TABLE_COLUMNS[tableKey] || [];

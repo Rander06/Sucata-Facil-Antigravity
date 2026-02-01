@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../store/AppContext';
-import { PermissionModule } from '../types';
+import { PermissionModule, UserRole } from '../types';
 import Inventory from './Inventory';
 import Partners from './Partners';
 import Users from './Users';
 import Finance from './Finance';
 import Banks from './Banks';
-import { 
-  Package, 
-  Users as UsersIcon, 
-  Settings, 
+import {
+  Package,
+  Users as UsersIcon,
+  Settings,
   CreditCard,
   ClipboardList,
   Layers,
@@ -24,57 +24,57 @@ const RegistrationHub: React.FC = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
   const tabs = [
-    { 
-      id: 'inventory', 
-      label: 'Estoque', 
+    {
+      id: 'inventory',
+      label: 'Estoque',
       description: 'Gestão de materiais e saldos',
-      icon: Package, 
-      permission: PermissionModule.STOCK,
+      icon: Package,
+      permission: PermissionModule.STOCK_VIEW,
       component: <Inventory />,
       color: 'green'
     },
-    { 
-      id: 'partners', 
-      label: 'Parceiros', 
+    {
+      id: 'partners',
+      label: 'Parceiros',
       description: 'Clientes e fornecedores',
-      icon: UsersIcon, 
-      permission: PermissionModule.PARTNERS,
+      icon: UsersIcon,
+      permission: PermissionModule.PARTNERS_VIEW,
       component: <Partners />,
       color: 'blue'
     },
-    { 
-      id: 'users', 
-      label: 'Equipe', 
+    {
+      id: 'users',
+      label: 'Equipe',
       description: 'Usuários e permissões de acesso',
-      icon: Settings, 
-      permission: PermissionModule.TEAM,
+      icon: Settings,
+      permission: PermissionModule.TEAM_VIEW,
       component: <Users />,
       color: 'yellow'
     },
-    { 
-      id: 'banks', 
-      label: 'Instituições Bancárias', 
+    {
+      id: 'banks',
+      label: 'Instituições Bancárias',
       description: 'Gestão de contas e bancos',
-      icon: Landmark, 
-      permission: PermissionModule.FINANCE,
+      icon: Landmark,
+      permission: PermissionModule.FINANCE_VIEW,
       component: <Banks />,
       color: 'green'
     },
-    { 
-      id: 'categories', 
-      label: 'Categorias Financeiras', 
+    {
+      id: 'categories',
+      label: 'Categorias Financeiras',
       description: 'Plano de contas e fluxos',
-      icon: Tag, 
-      permission: PermissionModule.FINANCE,
+      icon: Tag,
+      permission: PermissionModule.FINANCE_VIEW,
       component: <Finance mode="categories_only" />,
       color: 'red'
     },
-    { 
-      id: 'terms', 
-      label: 'Prazos Comerciais', 
+    {
+      id: 'terms',
+      label: 'Prazos Comerciais',
       description: 'Condições de pagamento',
-      icon: CreditCard, 
-      permission: PermissionModule.FINANCE,
+      icon: CreditCard,
+      permission: PermissionModule.FINANCE_VIEW,
       component: <Finance mode="terms_only" />,
       color: 'indigo'
     }
@@ -91,7 +91,9 @@ const RegistrationHub: React.FC = () => {
     }
   };
 
-  const allowedTabs = tabs.filter(tab => 
+  const allowedTabs = tabs.filter(tab =>
+    currentUser?.role === UserRole.SUPER_ADMIN ||
+    currentUser?.role === UserRole.COMPANY_ADMIN ||
     currentUser?.permissions.includes(tab.permission as PermissionModule)
   );
 
@@ -115,18 +117,17 @@ const RegistrationHub: React.FC = () => {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
         {allowedTabs.map(tab => (
-          <button 
-            key={tab.id} 
+          <button
+            key={tab.id}
             onClick={() => setActiveModal(tab.id)}
             className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(tab.color || 'green')}`}
           >
-            <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${
-              tab.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
+            <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${tab.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
               tab.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
-              tab.color === 'yellow' ? 'text-brand-warning group-hover:bg-brand-warning/10' :
-              tab.color === 'red' ? 'text-brand-error group-hover:bg-brand-error/10' :
-              'text-indigo-400 group-hover:bg-indigo-500/10'
-            }`}>
+                tab.color === 'yellow' ? 'text-brand-warning group-hover:bg-brand-warning/10' :
+                  tab.color === 'red' ? 'text-brand-error group-hover:bg-brand-error/10' :
+                    'text-indigo-400 group-hover:bg-indigo-500/10'
+              }`}>
               <tab.icon size={28} />
             </div>
             <div className="flex-1 min-w-0">
@@ -149,7 +150,7 @@ const RegistrationHub: React.FC = () => {
                 {allowedTabs.find(t => t.id === activeModal)?.label}
               </h2>
             </div>
-            <button 
+            <button
               onClick={() => setActiveModal(null)}
               className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4"
             >

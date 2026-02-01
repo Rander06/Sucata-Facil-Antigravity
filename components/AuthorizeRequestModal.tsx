@@ -64,7 +64,7 @@ Valor envolvido: ${val}`;
     setIsProcessing(true);
     setError('');
     try {
-      const manager = db.verifyCredentials(email, password, PermissionModule.ACTION_EDIT);
+      const manager = db.verifyCredentials(email, password, PermissionModule.TEAM_EDIT);
       if (!manager) {
         setError('Credenciais de gestor inválidas ou sem permissão de edição.');
         setIsProcessing(false);
@@ -85,7 +85,7 @@ Valor envolvido: ${val}`;
     setIsProcessing(true);
     setError('');
     try {
-      const manager = db.verifyCredentials(email, password, PermissionModule.ACTION_EDIT);
+      const manager = db.verifyCredentials(email, password, PermissionModule.TEAM_EDIT);
       if (!manager) {
         setError('Credenciais de gestor inválidas.');
         setIsProcessing(false);

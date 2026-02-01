@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { DEFAULT_PERMISSIONS } from '../utils/permissions';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
 import { User, PermissionModule, UserRole, OperationalProfile, AuthorizationRequest } from '../types';
@@ -24,7 +25,11 @@ import {
   ShieldCheck as ShieldCheckIcon,
   Contact2,
   User as UserIconNormal,
-  CreditCard as CreditCardIcon
+  CreditCard as CreditCardIcon,
+  ShoppingBag,
+  BarChart3,
+  Package,
+  Crown
 } from 'lucide-react';
 
 const Users: React.FC = () => {
@@ -37,6 +42,19 @@ const Users: React.FC = () => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [userModal, setUserModal] = useState<{ show: boolean, data: User | null }>({ show: false, data: null });
   const [isCopied, setIsCopied] = useState(false);
+  // Multi-Profile State
+  const [inviteProfiles, setInviteProfiles] = useState<OperationalProfile[]>([OperationalProfile.VENDEDOR]);
+  const [editProfiles, setEditProfiles] = useState<OperationalProfile[]>([]);
+
+  // Helper to merge permissions
+  const getCombinedPermissions = (profiles: OperationalProfile[]): PermissionModule[] => {
+    const allPerms = new Set<PermissionModule>();
+    profiles.forEach(p => {
+      const perms = DEFAULT_PERMISSIONS[p] || [];
+      perms.forEach(perm => allPerms.add(perm));
+    });
+    return Array.from(allPerms);
+  };
 
   // CONTROLE DE PEDIDOS DE LIBERAÇÃO REMOTA
   const [isRequestAuthModalOpen, setIsRequestAuthModalOpen] = useState(false);
@@ -89,9 +107,25 @@ const Users: React.FC = () => {
     }
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userModal.data) return;
+
+    // Se tiver permissão de edição direta
+    if (currentUser?.permissions.includes(PermissionModule.TEAM_EDIT)) {
+      try {
+        await db.update('users', userModal.data.id, editFormData);
+        // Se for o próprio usuário, pode ser bom dar um feedback, mas loadData já atualiza a tabela
+        db.logAction(companyId, currentUser.id, currentUser.name, 'TEAM_EDIT', `Editou usuário ${userModal.data.name}`);
+        alert('Usuário atualizado com sucesso!');
+        setUserModal({ show: false, data: null });
+        loadData();
+      } catch (err) {
+        alert('Erro ao salvar alterações.');
+      }
+      return;
+    }
+
     setAuthRequestData({
       key: 'EDITAR_USUARIO',
       label: `OP: EDIÇÃO DE ACESSO | ID: #${userModal.data.id.slice(-5)} | CTX: SEGURANÇA | DET: Reconfiguração das permissões e perfil do integrante ${userModal.data.name} para adequação de cargo. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${userModal.data.id} | JSON: ${JSON.stringify(editFormData)}`
@@ -140,7 +174,13 @@ const Users: React.FC = () => {
                   <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase border shadow-sm">{user.profile}</span>
                   {canManage && (
                     <div className="flex gap-2">
-                      {user.email !== 'admin@sucatafacil.com' && <button onClick={() => { setEditFormData({ ...user }); setUserModal({ show: true, data: user }); }} className="p-2.5 bg-slate-800 text-slate-400 rounded-xl"><Edit2 size={16} /></button>}
+                      {user.email !== 'admin@sucatafacil.com' && <button onClick={() => {
+                        setEditFormData({ ...user });
+                        // Validar se o perfil do usuário corresponde a um dos perfis padrão
+                        const profileEnum = Object.values(OperationalProfile).find(p => p === user.profile);
+                        setEditProfiles(profileEnum ? [profileEnum] : []);
+                        setUserModal({ show: true, data: user });
+                      }} className="p-2.5 bg-slate-800 text-slate-400 rounded-xl"><Edit2 size={16} /></button>}
                       {user.email !== 'admin@sucatafacil.com' && <button onClick={() => {
                         setAuthRequestData({
                           key: 'EXCLUIR_USUARIO',
@@ -216,8 +256,8 @@ const Users: React.FC = () => {
                     <td className="px-6 py-4 w-[15%] text-slate-400 font-bold uppercase text-[10px]">{invite.profile}</td>
                     <td className="px-6 py-4 w-[15%] text-center">
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border shadow-sm ${invite.status === 'accepted'
-                          ? 'bg-brand-success/10 text-brand-success border-brand-success/20'
-                          : 'bg-brand-warning/10 text-brand-warning border-brand-warning/20'
+                        ? 'bg-brand-success/10 text-brand-success border-brand-success/20'
+                        : 'bg-brand-warning/10 text-brand-warning border-brand-warning/20'
                         }`}>
                         {invite.status === 'accepted' ? 'Aceito' : 'Pendente'}
                       </span>
@@ -250,8 +290,105 @@ const Users: React.FC = () => {
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Edit2 size={24} /> Editar Integrante</h2><button onClick={() => setUserModal({ show: false, data: null })} className="p-2 text-slate-500"><X size={32} /></button></div>
             <form onSubmit={handleSaveUser} className="p-8 space-y-6">
-              <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
-              <button type="submit" className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-sm tracking-[0.2em] shadow-2xl">SOLICITAR LIBERAÇÃO EDIÇÃO</button>
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
+                <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Perfil de Acesso</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    { id: OperationalProfile.VENDEDOR, label: 'Vendedor', icon: Contact2 },
+                    { id: OperationalProfile.COMPRADOR, label: 'Comprador', icon: ShoppingBag },
+                    { id: OperationalProfile.FINANCEIRO, label: 'Financeiro', icon: BarChart3 },
+                    { id: OperationalProfile.ESTOQUE, label: 'Estoque', icon: Package },
+                    { id: OperationalProfile.GERENTE, label: 'Gerente', icon: ShieldCheckIcon },
+                    { id: OperationalProfile.MASTER, label: 'Master', icon: Crown },
+                  ].map(p => {
+                    const isSelected = editProfiles.includes(p.id);
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          const newProfiles = isSelected
+                            ? editProfiles.filter(x => x !== p.id)
+                            : [...editProfiles, p.id];
+                          setEditProfiles(newProfiles);
+
+                          const combinedPerms = getCombinedPermissions(newProfiles);
+                          setEditFormData({
+                            ...editFormData,
+                            profile: newProfiles.length === 1 ? newProfiles[0] : (newProfiles.length > 0 ? 'Personalizado' : ''),
+                            permissions: combinedPerms
+                          });
+                        }}
+                        className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col items-center gap-2 text-center ${isSelected ? 'bg-brand-success/10 border-brand-success text-brand-success' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                      >
+                        <p.icon size={24} />
+                        <span className="text-xs font-black uppercase">{p.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <Lock size={14} /> Permissões de Acesso
+                  </label>
+                  <span className="text-[10px] text-brand-success font-bold uppercase bg-brand-success/10 px-2 py-1 rounded-lg border border-brand-success/20">
+                    {(editFormData.permissions || []).length} Selecionadas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-2 bg-slate-950/30 rounded-xl border border-slate-800">
+                  {[
+                    { title: 'Dashboard', items: [PermissionModule.DASHBOARD, PermissionModule.SUPPORT_VIEW] },
+                    { title: 'Relatórios (Granular)', items: [PermissionModule.REPORTS_GENERAL, PermissionModule.REPORTS_RECEIVABLES, PermissionModule.REPORTS_PAYABLES, PermissionModule.REPORTS_STOCK, PermissionModule.REPORTS_PARTNERS, PermissionModule.REPORTS_AUDIT] },
+                    { title: 'Vendas (PDV)', items: [PermissionModule.SALES_VIEW, PermissionModule.SALES_CREATE, PermissionModule.SALES_CLOSE_CASHIER] },
+                    { title: 'Financeiro', items: [PermissionModule.FINANCE_VIEW, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE, PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_EXTRACT] },
+                    { title: 'Compras', items: [PermissionModule.PURCHASES_VIEW, PermissionModule.PURCHASES_CREATE, PermissionModule.PURCHASES_EDIT, PermissionModule.PURCHASES_DELETE] },
+                    { title: 'Estoque', items: [PermissionModule.STOCK_VIEW, PermissionModule.STOCK_CREATE, PermissionModule.STOCK_EDIT, PermissionModule.STOCK_DELETE, PermissionModule.STOCK_ADJUST] },
+                    { title: 'Parceiros', items: [PermissionModule.PARTNERS_VIEW, PermissionModule.PARTNERS_CREATE, PermissionModule.PARTNERS_EDIT, PermissionModule.PARTNERS_DELETE] },
+                    { title: 'Equipe', items: [PermissionModule.TEAM_VIEW, PermissionModule.TEAM_INVITE, PermissionModule.TEAM_EDIT, PermissionModule.TEAM_DELETE] },
+                    { title: 'SaaS Master', items: [PermissionModule.SAAS_DASHBOARD, PermissionModule.SAAS_COMPANIES, PermissionModule.SAAS_PLANS] },
+                  ].map(group => (
+                    <div key={group.title} className="col-span-full space-y-2 mb-2">
+                      <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest pl-1 border-b border-slate-800 pb-1">{group.title}</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {group.items.map(perm => {
+                          const isSelected = (editFormData.permissions || []).includes(perm);
+                          return (
+                            <label key={perm} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-slate-800 border-brand-success/50 text-white' : 'bg-transparent border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                              <input
+                                type="checkbox"
+                                className="hidden"
+                                checked={isSelected}
+                                onChange={() => {
+                                  const currentPerms = editFormData.permissions || [];
+                                  if (isSelected) {
+                                    setEditFormData({ ...editFormData, permissions: currentPerms.filter(p => p !== perm) });
+                                  } else {
+                                    setEditFormData({ ...editFormData, permissions: [...currentPerms, perm] });
+                                  }
+                                }}
+                              />
+                              <div className={`w-3 h-3 rounded-[3px] border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-brand-success border-brand-success text-black' : 'border-slate-600'}`}>
+                                {isSelected && <CheckCircle2 size={8} strokeWidth={4} />}
+                              </div>
+                              <span className="text-[9px] font-bold uppercase truncate leading-none" title={perm}>{perm.replace(/_/g, ' ')}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button type="submit" className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all">SOLICITAR LIBERAÇÃO EDIÇÃO</button>
             </form>
           </div>
         </div>
@@ -317,16 +454,89 @@ const Users: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {[
                     { id: OperationalProfile.VENDEDOR, label: 'Vendedor', icon: Contact2 },
-                    { id: OperationalProfile.CAIXA, label: 'Operador Caixa', icon: CreditCardIcon },
+                    { id: OperationalProfile.COMPRADOR, label: 'Comprador', icon: ShoppingBag },
+                    { id: OperationalProfile.FINANCEIRO, label: 'Financeiro', icon: BarChart3 },
+                    { id: OperationalProfile.ESTOQUE, label: 'Estoque', icon: Package },
                     { id: OperationalProfile.GERENTE, label: 'Gerente', icon: ShieldCheckIcon },
-                  ].map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => setInviteForm({ ...inviteForm, profile: p.id })}
-                      className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col items-center gap-2 text-center ${inviteForm.profile === p.id ? 'bg-brand-success/10 border-brand-success text-brand-success' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
-                    >
-                      <p.icon size={24} />
-                      <span className="text-xs font-black uppercase">{p.label}</span>
+                    { id: OperationalProfile.MASTER, label: 'Master', icon: Crown },
+                  ].map(p => {
+                    const isSelected = inviteProfiles.includes(p.id);
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          const newProfiles = isSelected
+                            ? inviteProfiles.filter(x => x !== p.id)
+                            : [...inviteProfiles, p.id];
+                          setInviteProfiles(newProfiles);
+
+                          const combinedPerms = getCombinedPermissions(newProfiles);
+                          setInviteForm({
+                            ...inviteForm,
+                            profile: newProfiles.length === 1 ? newProfiles[0] : (newProfiles.length > 0 ? 'Personalizado' : ''),
+                            permissions: combinedPerms
+                          });
+                        }}
+                        className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col items-center gap-2 text-center ${isSelected ? 'bg-brand-success/10 border-brand-success text-brand-success' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                      >
+                        <p.icon size={24} />
+                        <span className="text-xs font-black uppercase">{p.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* PERMISSIONS CHECKLIST */}
+              <div className="space-y-4 pt-6 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <Lock size={14} /> Permissões de Acesso
+                  </label>
+                  <span className="text-[10px] text-brand-success font-bold uppercase bg-brand-success/10 px-2 py-1 rounded-lg border border-brand-success/20">
+                    {inviteForm.permissions.length} Selecionadas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-2 bg-slate-950/30 rounded-xl border border-slate-800">
+                  {[
+                    { title: 'Dashboard', items: [PermissionModule.DASHBOARD, PermissionModule.SUPPORT_VIEW] },
+                    { title: 'Relatórios (Granular)', items: [PermissionModule.REPORTS_GENERAL, PermissionModule.REPORTS_RECEIVABLES, PermissionModule.REPORTS_PAYABLES, PermissionModule.REPORTS_STOCK, PermissionModule.REPORTS_PARTNERS, PermissionModule.REPORTS_AUDIT] },
+                    { title: 'Vendas (PDV)', items: [PermissionModule.SALES_VIEW, PermissionModule.SALES_CREATE, PermissionModule.SALES_CLOSE_CASHIER] },
+                    { title: 'Financeiro', items: [PermissionModule.FINANCE_VIEW, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE, PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_EXTRACT] },
+                    { title: 'Compras', items: [PermissionModule.PURCHASES_VIEW, PermissionModule.PURCHASES_CREATE, PermissionModule.PURCHASES_EDIT, PermissionModule.PURCHASES_DELETE] },
+                    { title: 'Estoque', items: [PermissionModule.STOCK_VIEW, PermissionModule.STOCK_CREATE, PermissionModule.STOCK_EDIT, PermissionModule.STOCK_DELETE, PermissionModule.STOCK_ADJUST] },
+                    { title: 'Parceiros', items: [PermissionModule.PARTNERS_VIEW, PermissionModule.PARTNERS_CREATE, PermissionModule.PARTNERS_EDIT, PermissionModule.PARTNERS_DELETE] },
+                    { title: 'Equipe', items: [PermissionModule.TEAM_VIEW, PermissionModule.TEAM_INVITE, PermissionModule.TEAM_EDIT, PermissionModule.TEAM_DELETE] },
+                    { title: 'SaaS Master', items: [PermissionModule.SAAS_DASHBOARD, PermissionModule.SAAS_COMPANIES, PermissionModule.SAAS_PLANS] },
+                  ].map(group => (
+                    <div key={group.title} className="col-span-full space-y-2 mb-2">
+                      <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest pl-1 border-b border-slate-800 pb-1">{group.title}</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {group.items.map(perm => {
+                          const isSelected = inviteForm.permissions.includes(perm);
+                          return (
+                            <label key={perm} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-slate-800 border-brand-success/50 text-white' : 'bg-transparent border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                              <input
+                                type="checkbox"
+                                className="hidden"
+                                checked={isSelected}
+                                onChange={() => {
+                                  if (isSelected) {
+                                    setInviteForm(prev => ({ ...prev, permissions: prev.permissions.filter(p => p !== perm) }));
+                                  } else {
+                                    setInviteForm(prev => ({ ...prev, permissions: [...prev.permissions, perm] }));
+                                  }
+                                }}
+                              />
+                              <div className={`w-3 h-3 rounded-[3px] border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-brand-success border-brand-success text-black' : 'border-slate-600'}`}>
+                                {isSelected && <CheckCircle2 size={8} strokeWidth={4} />}
+                              </div>
+                              <span className="text-[9px] font-bold uppercase truncate leading-none" title={perm}>{perm.replace(/_/g, ' ')}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -88,7 +88,19 @@ const POS: React.FC = () => {
   const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedPartnerId, setSelectedPartnerId] = useState('');
-  const [type, setType] = useState<'buy' | 'sell'>('buy');
+  const [type, setType] = useState<'buy' | 'sell'>(() => {
+    if (currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) return 'buy';
+    if (currentUser?.permissions.includes(PermissionModule.SALES_VIEW)) return 'sell';
+    return 'buy'; // Fallback
+  });
+
+  // ... (Lines 93-870 remain unchanged in context, but we are replacing the state init line 91)
+  // Wait, I strictly cannot easily replace line 91 and 870 in one go if they are far apart.
+  // I will split this into two calls or use multi-replace if supported.
+  // The tool description says: "Use this tool ONLY when you are making a SINGLE CONTIGUOUS block of edits".
+  // So I must use multi_replace_file_content if I want to edit line 91 and 871.
+  // Converting this call to multi_replace...
+
   const [search, setSearchTerm] = useState('');
 
   const [activeSession, setActiveSession] = useState<CashierSession | null>(null);
@@ -868,8 +880,12 @@ const POS: React.FC = () => {
           <div className="flex-1 space-y-6">
             <div className="enterprise-card p-4 flex flex-col md:flex-row gap-4 items-center bg-slate-900/50">
               <div className="flex bg-brand-dark p-1 rounded-xl border border-slate-800 w-full md:w-auto">
-                <button onClick={() => { if (!editingRecordId) { setType('buy'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
-                <button onClick={() => { if (!editingRecordId) { setType('sell'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'sell' ? 'bg-brand-success text-white' : 'text-slate-500'}`}>Venda</button>
+                {currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW) && (
+                  <button onClick={() => { if (!editingRecordId) { setType('buy'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
+                )}
+                {currentUser?.permissions.includes(PermissionModule.SALES_VIEW) && (
+                  <button onClick={() => { if (!editingRecordId) { setType('sell'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'sell' ? 'bg-brand-success text-white' : 'text-slate-500'}`}>Venda</button>
+                )}
               </div>
               <div className="flex-1 flex items-center gap-4 bg-brand-dark border border-slate-800 rounded-xl px-4 py-2.5 w-full focus-within:border-brand-success transition-all">
                 <Search size={18} className="text-slate-500" /><input type="text" placeholder="Localizar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={search} onChange={e => setSearchTerm(e.target.value)} />

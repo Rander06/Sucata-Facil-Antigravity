@@ -26,7 +26,7 @@ const Header: React.FC<HeaderProps> = ({
                 {isSyncing && <RefreshCw size={14} className="text-brand-success animate-spin ml-2" />}
             </div>
             <div className="flex items-center gap-3">
-                {isAdmin && activeNotificationCount > 0 && (
+                {activeNotificationCount > 0 && (
                     <button
                         onClick={() => setIsAuthModalOpen(true)}
                         className="flex items-center justify-center w-8 h-8 bg-brand-error text-white rounded-lg animate-pulse shadow-lg shadow-brand-error/20 relative"

@@ -85,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </nav>
 
             {/* INDICADOR DE LIBERAÇÕES PENDENTES */}
-            {isAdmin && activeNotificationCount > 0 && (
+            {activeNotificationCount > 0 && (
                 <button
                     onClick={() => setIsAuthModalOpen(true)}
                     className={`mx-3 mb-2 p-3 bg-brand-error/10 border border-brand-error/20 rounded-xl flex items-center gap-3 animate-in slide-in-from-left-4 hover:bg-brand-error/20 transition-all group ${!isSidebarOpen && 'justify-center'}`}

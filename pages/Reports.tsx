@@ -298,12 +298,12 @@ Valor envolvido: ${val}`;
   }, [filteredMaterialsReport]);
 
   const reportItems = [
-    { id: 'financial_statement', label: 'Extrato Geral', description: 'Consolidado de movimentações', icon: ArrowLeftRight, color: 'green' },
-    { id: 'receivables_mirror', label: 'Contas a Receber', description: 'Vendas e títulos de entrada', icon: ArrowUpCircle, color: 'blue' },
-    { id: 'payables_mirror', label: 'Contas a Pagar', description: 'Compras e títulos de saída', icon: ArrowDownCircle, color: 'red' },
-    { id: 'inventory_report', label: 'Saldo de Estoque', description: 'Saldos e projeção de pátio', icon: Package, color: 'yellow' },
-    { id: 'partners_report', label: 'Mov. do Parceiros', description: 'Filtro avançado de parceiros', icon: UsersIcon, color: 'indigo' },
-    { id: 'audit_report', label: 'Auditoria de Logs', description: 'Histórico narrativo de segurança', icon: HistoryIcon, color: 'yellow' }
+    { id: 'financial_statement', label: 'Extrato Geral', description: 'Consolidado de movimentações', icon: ArrowLeftRight, color: 'green', permission: PermissionModule.REPORTS_GENERAL },
+    { id: 'receivables_mirror', label: 'Contas a Receber', description: 'Vendas e títulos de entrada', icon: ArrowUpCircle, color: 'blue', permission: PermissionModule.REPORTS_RECEIVABLES },
+    { id: 'payables_mirror', label: 'Contas a Pagar', description: 'Compras e títulos de saída', icon: ArrowDownCircle, color: 'red', permission: PermissionModule.REPORTS_PAYABLES },
+    { id: 'inventory_report', label: 'Saldo de Estoque', description: 'Saldos e projeção de pátio', icon: Package, color: 'yellow', permission: PermissionModule.REPORTS_STOCK },
+    { id: 'partners_report', label: 'Mov. do Parceiros', description: 'Filtro avançado de parceiros', icon: UsersIcon, color: 'indigo', permission: PermissionModule.REPORTS_PARTNERS },
+    { id: 'audit_report', label: 'Auditoria de Logs', description: 'Histórico narrativo de segurança', icon: HistoryIcon, color: 'yellow', permission: PermissionModule.REPORTS_AUDIT }
   ];
 
   const getColorClasses = (color: string) => {
@@ -345,7 +345,6 @@ Valor envolvido: ${val}`;
     try { const d = new Date(iso); if (isNaN(d.getTime())) return ''; return d.toLocaleTimeString('pt-BR'); } catch { return ''; }
   };
 
-  // Fix: Property 'parceiro_id' does not exist on type 'Transaction'. Updated signature and implementation to inject partnerId into details view.
   const openTransactionDetails = (transactionId?: string, partnerId?: string) => {
     if (!transactionId) return;
     const trans = db.queryTenant<Transaction>('transactions', companyId).find(t => t.id === transactionId);
@@ -369,7 +368,7 @@ Valor envolvido: ${val}`;
       </header>
 
       <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-2 no-print ${activeModal ? 'hidden lg:grid' : ''}`}>
-        {reportItems.map(item => (
+        {reportItems.filter(item => isSuperAdmin || currentUser?.permissions.includes(item.permission)).map(item => (
           <button key={item.id} onClick={() => { setActiveModal(item.id as any); setFilters({}); }} className={`enterprise-card p-8 flex items-center gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)} hover:scale-[1.01]`}>
             <div className={`w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${getIconColorClasses(item.color)}`}><item.icon size={32} /></div>
             <div className="flex-1 min-w-0"><h3 className="text-white font-black uppercase text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3><p className="text-slate-500 text-xs mt-1 truncate font-medium">{item.description}</p></div>
@@ -377,6 +376,8 @@ Valor envolvido: ${val}`;
           </button>
         ))}
       </div>
+
+
 
       {activeModal && (
         <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">

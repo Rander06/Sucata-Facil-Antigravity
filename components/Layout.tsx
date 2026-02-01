@@ -57,22 +57,28 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
 
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, category: 'OPERACIONAL', permission: PermissionModule.DASHBOARD },
     { id: 'registration', label: 'Cadastro', icon: ClipboardList, category: 'OPERACIONAL', permission: 'ANY_REGISTRATION' },
-    { id: 'finance-hub', label: 'Financeiro', icon: Wallet, category: 'OPERACIONAL', permission: PermissionModule.FINANCE },
-    { id: 'pos', label: 'Compra / Venda', icon: ShoppingCart, category: 'OPERACIONAL', permission: PermissionModule.PURCHASES },
-    { id: 'reports', label: 'Relatórios', icon: BarChart3, category: 'OPERACIONAL', permission: PermissionModule.REPORTS },
-    { id: 'support', label: 'Suporte & Backup', icon: LifeBuoy, category: 'OPERACIONAL', permission: PermissionModule.SUPPORT },
+    { id: 'finance-hub', label: 'Financeiro', icon: Wallet, category: 'OPERACIONAL', permission: PermissionModule.FINANCE_VIEW },
+    { id: 'pos', label: 'Compra / Venda', icon: ShoppingCart, category: 'OPERACIONAL', permission: PermissionModule.PURCHASES_VIEW },
+    { id: 'reports', label: 'Relatórios', icon: BarChart3, category: 'OPERACIONAL', permission: PermissionModule.REPORTS_VIEW },
+    { id: 'support', label: 'Suporte & Backup', icon: LifeBuoy, category: 'OPERACIONAL', permission: PermissionModule.SUPPORT_VIEW },
   ];
 
   const filteredMenu = menuItems.filter(item => {
     if (isMasterUser) return true;
+    // Admins da empresa também têm acesso total aos módulos operacionais
+    if (currentUser.role === UserRole.COMPANY_ADMIN && item.category === 'OPERACIONAL') return true;
+
     if (item.id === 'registration') {
       const registrationPermissions = [
-        PermissionModule.STOCK,
-        PermissionModule.PARTNERS,
-        PermissionModule.TEAM,
-        PermissionModule.FINANCE
+        PermissionModule.STOCK_VIEW,
+        PermissionModule.PARTNERS_VIEW,
+        PermissionModule.TEAM_VIEW,
+        PermissionModule.FINANCE_VIEW
       ];
       return registrationPermissions.some(p => currentUser.permissions.includes(p));
+    }
+    if (item.id === 'pos') {
+      return currentUser.permissions.includes(PermissionModule.PURCHASES_VIEW) || currentUser.permissions.includes(PermissionModule.SALES_VIEW);
     }
     return currentUser.permissions.includes(item.permission as PermissionModule);
   });

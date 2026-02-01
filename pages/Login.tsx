@@ -24,13 +24,107 @@ const Login: React.FC = () => {
     document: '',
     password: '',
     confirmPassword: '',
-    planId: 'p-pro'
+    planId: ''
   });
 
   const [inviteRegForm, setInviteRegForm] = useState({
     password: '',
     confirmPassword: ''
   });
+
+  const [availablePlans, setAvailablePlans] = useState<Plan[]>([]);
+
+  // Carregar planos disponíveis
+  useEffect(() => {
+    const loadPlans = async () => {
+      const client = db.getCloudClient();
+      if (client) {
+        console.log('🔍 Carregando planos do Supabase...');
+        const { data, error } = await client.from('plans').select('*').order('price');
+
+        if (error) {
+          console.error('❌ Erro ao carregar planos:', error);
+          setError(`Erro ao carregar planos: ${error.message}`);
+        } else {
+          console.log('✅ Planos carregados:', data);
+          if (data) setAvailablePlans(data);
+        }
+      } else {
+        console.warn('⚠️ Cliente Supabase não disponível');
+      }
+    };
+    if (mode === 'register') {
+      loadPlans();
+    }
+  }, [mode]);
+
+  // Função para validar CPF
+  const validateCPF = (cpf: string): boolean => {
+    const cleaned = cpf.replace(/\D/g, '');
+    if (cleaned.length !== 11) return false;
+    if (/^(\d)\1+$/.test(cleaned)) return false;
+
+    let sum = 0;
+    for (let i = 0; i < 9; i++) {
+      sum += parseInt(cleaned.charAt(i)) * (10 - i);
+    }
+    let rev = 11 - (sum % 11);
+    if (rev === 10 || rev === 11) rev = 0;
+    if (rev !== parseInt(cleaned.charAt(9))) return false;
+
+    sum = 0;
+    for (let i = 0; i < 10; i++) {
+      sum += parseInt(cleaned.charAt(i)) * (11 - i);
+    }
+    rev = 11 - (sum % 11);
+    if (rev === 10 || rev === 11) rev = 0;
+    if (rev !== parseInt(cleaned.charAt(10))) return false;
+
+    return true;
+  };
+
+  // Função para validar CNPJ
+  const validateCNPJ = (cnpj: string): boolean => {
+    const cleaned = cnpj.replace(/\D/g, '');
+    if (cleaned.length !== 14) return false;
+    if (/^(\d)\1+$/.test(cleaned)) return false;
+
+    let length = cleaned.length - 2;
+    let numbers = cleaned.substring(0, length);
+    const digits = cleaned.substring(length);
+    let sum = 0;
+    let pos = length - 7;
+
+    for (let i = length; i >= 1; i--) {
+      sum += parseInt(numbers.charAt(length - i)) * pos--;
+      if (pos < 2) pos = 9;
+    }
+
+    let result = sum % 11 < 2 ? 0 : 11 - (sum % 11);
+    if (result !== parseInt(digits.charAt(0))) return false;
+
+    length = length + 1;
+    numbers = cnpj.substring(0, length);
+    sum = 0;
+    pos = length - 7;
+
+    for (let i = length; i >= 1; i--) {
+      sum += parseInt(numbers.charAt(length - i)) * pos--;
+      if (pos < 2) pos = 9;
+    }
+
+    result = sum % 11 < 2 ? 0 : 11 - (sum % 11);
+    if (result !== parseInt(digits.charAt(1))) return false;
+
+    return true;
+  };
+
+  // Função para validar telefone/WhatsApp
+  const validatePhone = (phone: string): boolean => {
+    const cleaned = phone.replace(/\D/g, '');
+    return cleaned.length >= 10 && cleaned.length <= 11;
+  };
+
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,6 +199,30 @@ const Login: React.FC = () => {
       setError("As senhas não coincidem.");
       return;
     }
+
+    // Validar CPF ou CNPJ
+    const docCleaned = regForm.document.replace(/\D/g, '');
+    if (docCleaned.length === 11) {
+      if (!validateCPF(regForm.document)) {
+        setError("CPF inválido. Verifique o número digitado.");
+        return;
+      }
+    } else if (docCleaned.length === 14) {
+      if (!validateCNPJ(regForm.document)) {
+        setError("CNPJ inválido. Verifique o número digitado.");
+        return;
+      }
+    } else {
+      setError("Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.");
+      return;
+    }
+
+    // Validar telefone/WhatsApp
+    if (!validatePhone(regForm.whatsapp)) {
+      setError("Telefone/WhatsApp inválido. Informe um número com DDD (mínimo 10 dígitos).");
+      return;
+    }
+
     setLoading(true);
 
     let createdCompanyId = null;
@@ -131,6 +249,7 @@ const Login: React.FC = () => {
         const { data: company, error: compErr } = await client.from('companies').insert({
           name: regForm.companyName.toUpperCase(),
           cnpj: regForm.document,
+          whatsapp: regForm.whatsapp,
           plan_id: regForm.planId,
           status: 'trial',
           expires_at: expiresStr
@@ -245,6 +364,7 @@ const Login: React.FC = () => {
               name: inviteData.name,
               company_id: inviteData.company_id,
               profile: inviteData.profile,
+              permissions: inviteData.permissions, // Passando as permissões definidas no convite
               invite_id: inviteData.id
             }
           }
@@ -370,9 +490,64 @@ const Login: React.FC = () => {
                     <label className="text-sm font-semibold text-slate-400">E-mail Gestor</label>
                     <input type="email" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.email} onChange={(e) => setRegForm({ ...regForm, email: e.target.value })} />
                   </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-400">CPF ou CNPJ</label>
+                      <div className="relative">
+                        <FileText className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                        <input
+                          type="text"
+                          required
+                          placeholder="000.000.000-00"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium font-mono"
+                          value={regForm.document}
+                          onChange={(e) => setRegForm({ ...regForm, document: e.target.value })}
+                        />
+                      </div>
+                      <p className="text-[9px] text-slate-500 uppercase tracking-wide">11 dígitos (CPF) ou 14 (CNPJ)</p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-slate-400">WhatsApp / Telefone</label>
+                      <div className="relative">
+                        <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                        <input
+                          type="tel"
+                          required
+                          placeholder="(00) 00000-0000"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium font-mono"
+                          value={regForm.whatsapp}
+                          onChange={(e) => setRegForm({ ...regForm, whatsapp: e.target.value })}
+                        />
+                      </div>
+                      <p className="text-[9px] text-slate-500 uppercase tracking-wide">Com DDD (10-11 dígitos)</p>
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <label className="text-sm font-semibold text-slate-400">Nome Fantasia da Empresa</label>
                     <input type="text" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium uppercase" value={regForm.companyName} onChange={(e) => setRegForm({ ...regForm, companyName: e.target.value })} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-slate-400">Plano de Assinatura</label>
+                    <select
+                      required
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium uppercase appearance-none cursor-pointer"
+                      value={regForm.planId}
+                      onChange={(e) => setRegForm({ ...regForm, planId: e.target.value })}
+                    >
+                      <option value="" disabled>Selecione um plano</option>
+                      {availablePlans.map(plan => (
+                        <option key={plan.id} value={plan.id}>
+                          {plan.name} - R$ {plan.price?.toFixed(2)} ({plan.max_users} usuário{plan.max_users > 1 ? 's' : ''})
+                        </option>
+                      ))}
+                    </select>
+                    {regForm.planId && availablePlans.find(p => p.id === regForm.planId) && (
+                      <div className="p-3 bg-brand-success/5 border border-brand-success/20 rounded-xl">
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
+                          {availablePlans.find(p => p.id === regForm.planId)?.description}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">

@@ -18,6 +18,32 @@ const parseNumericString = (val: string) => {
   return parseFloat(clean) || 0;
 };
 
+/**
+ * Corrige problemas de encoding UTF-8 em textos do banco de dados
+ * Converte caracteres mal codificados para seus equivalentes corretos
+ */
+const fixEncoding = (text: string): string => {
+  if (!text) return '';
+
+  return text
+    .replace(/DEPÃ"SITO/g, 'DEPÓSITO')
+    .replace(/DEPÃƒÂ"SITO/g, 'DEPÓSITO')
+    .replace(/Ã"/g, 'Ó')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ã/g, 'Á')
+    .replace(/Ã§/g, 'ç')
+    .replace(/Ã£/g, 'ã')
+    .replace(/Ãº/g, 'ú')
+    .replace(/Ã­/g, 'í')
+    .replace(/Ã'/g, 'à')
+    .replace(/Ã/g, 'É')
+    .replace(/Ãš/g, 'Ú')
+    .replace(/Ã/g, 'Í')
+    .replace(/Ã'/g, 'À')
+    .replace(/Ã‡/g, 'Ç')
+    .replace(/Ãƒ/g, 'Ã');
+};
+
 const getStatusInfo = (record: FinancialRecord) => {
   const isCanceled = record.status === 'reversed' || record.is_reversed || record.isReversed;
   const isPaid = !!record.liquidation_date || record.status === 'paid';
@@ -911,7 +937,7 @@ const FinanceHub: React.FC = () => {
                               <td className="px-6 py-4 text-slate-500 font-mono font-bold">{new Date(t.created_at).toLocaleDateString()} <span className="opacity-40">{new Date(t.created_at).toLocaleTimeString()}</span></td>
                               <td className="px-6 py-4 font-black uppercase text-slate-200">{bank ? bank.name : t.parceiro}</td>
                               <td className="px-6 py-4">
-                                <p className="text-slate-300 uppercase font-medium line-clamp-1">{t.descricao}</p>
+                                <p className="text-slate-300 uppercase font-medium whitespace-normal break-words">{t.descricao}</p>
                                 <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">{term?.name || t.forma || 'Lançamento Direto'}</p>
                               </td>
                               <td className="px-6 py-4 uppercase text-[10px] font-black text-brand-success/80">
@@ -919,7 +945,7 @@ const FinanceHub: React.FC = () => {
                                   <span>{operator?.name || t.user_name || 'Sistema'}</span>
                                   {t.operador_name && (
                                     <span className="text-[8px] text-slate-500 font-bold border-t border-slate-800/50 mt-1 pt-1 italic">
-                                      CONF: {t.operador_name}
+                                      OP.CX: {t.operador_name}
                                     </span>
                                   )}
                                 </div>

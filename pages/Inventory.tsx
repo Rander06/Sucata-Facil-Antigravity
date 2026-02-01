@@ -4,12 +4,12 @@ import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
 import { Material, PermissionModule, AuthorizationRequest } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
-import { 
-  Package, 
-  Plus, 
-  Search, 
-  TrendingUp, 
-  Scale, 
+import {
+  Package,
+  Plus,
+  Search,
+  TrendingUp,
+  Scale,
   AlertTriangle,
   X,
   Edit2,
@@ -30,13 +30,13 @@ const Inventory: React.FC = () => {
   const [showModal, setSearchModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit' | 'view'>('create');
   const [editingId, setEditingId] = useState<string | null>(null);
-  
-  const [adjustModal, setAdjustModal] = useState<{show: boolean, material: Material | null, newVal: string}>({ show: false, material: null, newVal: '' });
-  
+
+  const [adjustModal, setAdjustModal] = useState<{ show: boolean, material: Material | null, newVal: string }>({ show: false, material: null, newVal: '' });
+
   const [isRequestEditAuthModalOpen, setIsRequestEditAuthModalOpen] = useState(false);
   const [isRequestDeleteAuthModalOpen, setIsRequestDeleteAuthModalOpen] = useState(false);
   const [isRequestAdjustAuthModalOpen, setIsRequestAdjustAuthModalOpen] = useState(false);
-  
+
   const [editToRequest, setEditToRequest] = useState<any>(null);
   const [deleteIdToRequest, setDeleteIdToRequest] = useState<string | null>(null);
   const [adjustToRequest, setAdjustToRequest] = useState<any>(null);
@@ -53,7 +53,7 @@ const Inventory: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    const findApproved = (key: string) => db.query<AuthorizationRequest>('authorization_requests' as any, r => 
+    const findApproved = (key: string) => db.query<AuthorizationRequest>('authorization_requests' as any, r =>
       r.status === 'APPROVED' && r.action_key === key && r.requested_by_id === currentUser.id
     ).sort((a, b) => new Date(b.responded_at || 0).getTime() - new Date(a.responded_at || 0).getTime())[0];
 
@@ -85,14 +85,14 @@ const Inventory: React.FC = () => {
     const approvedAdjust = findApproved('AJUSTAR_ESTOQUE');
     if (approvedAdjust) {
       db.update('authorization_requests' as any, approvedAdjust.id, { status: 'PROCESSED' } as any);
-      
+
       const label = approvedAdjust.action_label;
       const id = label.split('REAL_ID: ')[1]?.trim();
-      
+
       // Extração robusta do valor numérico ignorando "para" descritivos
       const valPart = label.split('VAL: ')[1]?.split(' | REAL_ID')[0];
       const newValStr = valPart?.split(' para ')[1]?.trim(); // Espaços para evitar falsos positivos
-      
+
       // Remove formatação brasileira para parseFloat padrão
       const val = parseFloat(newValStr?.replace(/\./g, '').replace(',', '.') || '0');
 
@@ -109,22 +109,37 @@ const Inventory: React.FC = () => {
     if (modalMode === 'view') return;
 
     if (modalMode === 'edit' && editingId) {
-      const original = materials.find(m => m.id === editingId);
-      if (original) {
-        const delta: any = {};
-        let hasChanges = false;
-        Object.keys(formData).forEach(k => {
-          const key = k as keyof Material;
-          if (formData[key] !== original[key] && !['id', 'companyId', 'company_id', 'created_at'].includes(k)) {
-            delta[k] = formData[key];
-            hasChanges = true;
-          }
-        });
-        if (!hasChanges) return setSearchModal(false);
-        setEditToRequest({ id: editingId, name: original.name, data: delta });
-        setIsRequestEditAuthModalOpen(true);
+      if (!currentUser?.permissions.includes(PermissionModule.STOCK_EDIT)) {
+        // Se não tem permissão direta, usa fluxo de autorização
+        const original = materials.find(m => m.id === editingId);
+        if (original) {
+          const delta: any = {};
+          let hasChanges = false;
+          Object.keys(formData).forEach(k => {
+            const key = k as keyof Material;
+            if (formData[key] !== original[key] && !['id', 'companyId', 'company_id', 'created_at'].includes(k)) {
+              delta[k] = formData[key];
+              hasChanges = true;
+            }
+          });
+          if (!hasChanges) return setSearchModal(false);
+          setEditToRequest({ id: editingId, name: original.name, data: delta });
+          setIsRequestEditAuthModalOpen(true);
+        }
+        return;
       }
+
+      // Tem permissão direta
+      await db.update('materials', editingId, formData);
+      db.logAction(companyId, currentUser.id, currentUser.name, 'STOCK_EDIT', `Editou material ${formData.name}`);
+      setSearchModal(false); loadMaterials(); setEditingId(null);
+
     } else {
+      // CREATE MODE
+      if (!currentUser?.permissions.includes(PermissionModule.STOCK_CREATE)) {
+        alert("Você não tem permissão para cadastrar novos materiais.");
+        return;
+      }
       await db.insert<Material>('materials', { ...formData, companyId, usuario_id: currentUser?.id });
       db.logAction(companyId, currentUser!.id, currentUser!.name, 'STOCK_ADD', `CADASTRADO: Novo material "${formData.name}"`);
       setSearchModal(false); loadMaterials();
@@ -135,9 +150,32 @@ const Inventory: React.FC = () => {
     if (!adjustModal.material) return;
     const newVal = parseFloat(adjustModal.newVal);
     if (isNaN(newVal)) return;
-    setAdjustToRequest({ id: adjustModal.material.id, val: newVal, name: adjustModal.material.name, oldVal: adjustModal.material.stock });
-    setIsRequestAdjustAuthModalOpen(true);
-    setAdjustModal({ show: false, material: null, newVal: '' });
+
+    if (currentUser?.permissions.includes(PermissionModule.STOCK_ADJUST)) {
+      // Permissão direta de ajuste
+      db.update('materials', adjustModal.material.id, { stock: newVal });
+      db.logAction(companyId, currentUser.id, currentUser.name, 'STOCK_ADJUST', `Ajuste manual de saldo: ${adjustModal.material.name} para ${newVal}`);
+      setAdjustModal({ show: false, material: null, newVal: '' });
+      loadMaterials();
+    } else {
+      // Solicita autorização
+      setAdjustToRequest({ id: adjustModal.material.id, val: newVal, name: adjustModal.material.name, oldVal: adjustModal.material.stock });
+      setIsRequestAdjustAuthModalOpen(true);
+      setAdjustModal({ show: false, material: null, newVal: '' });
+    }
+  };
+
+  const handleDelete = (material: Material) => {
+    if (currentUser?.permissions.includes(PermissionModule.STOCK_DELETE)) {
+      if (confirm(`Tem certeza que deseja excluir o material "${material.name}"?`)) {
+        db.delete('materials', material.id);
+        db.logAction(companyId, currentUser.id, currentUser.name, 'STOCK_DELETE', `Excluiu material ${material.name}`);
+        loadMaterials();
+      }
+    } else {
+      setDeleteIdToRequest(material.id);
+      setIsRequestDeleteAuthModalOpen(true);
+    }
   };
 
   return (
@@ -154,9 +192,9 @@ const Inventory: React.FC = () => {
 
       <div className="mx-1 enterprise-card border-slate-800 overflow-hidden shadow-2xl">
         <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex items-center gap-4">
-           <div className="flex items-center gap-4 bg-brand-dark p-3 px-5 rounded-2xl border-2 border-slate-800 max-w-md w-full group focus-within:border-brand-success transition-all">
-             <Search size={20} className="text-slate-500" /><input type="text" placeholder="Pesquisar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-           </div>
+          <div className="flex items-center gap-4 bg-brand-dark p-3 px-5 rounded-2xl border-2 border-slate-800 max-w-md w-full group focus-within:border-brand-success transition-all">
+            <Search size={20} className="text-slate-500" /><input type="text" placeholder="Pesquisar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+          </div>
         </div>
         <div className="overflow-x-auto bg-slate-900/40">
           <table className="w-full text-left text-sm min-w-[1000px]">
@@ -166,13 +204,13 @@ const Inventory: React.FC = () => {
                 <tr key={m.id} className="hover:bg-slate-800/20 transition-all group">
                   <td className="px-8 py-5"><p className="font-black text-slate-200 uppercase tracking-tight text-base truncate">{m.name}</p><p className="text-[10px] text-slate-600 uppercase font-bold mt-1 tracking-widest">Preço: R$ {(m.buy_price || m.buyPrice || 0).toLocaleString()} / {m.unit}</p></td>
                   <td className={`px-8 py-5 text-center font-black text-lg ${m.stock <= (m.min_stock || m.minStock || 0) ? 'text-brand-error animate-pulse' : 'text-blue-400'}`}>{m.stock.toLocaleString()} <span className="text-xs opacity-40 uppercase">{m.unit}</span></td>
-                  <td className="px-8 py-5"><div className="w-32 h-2.5 bg-slate-900 rounded-full mx-auto overflow-hidden border border-slate-800"><div className={`h-full ${m.stock <= (m.min_stock || m.minStock || 0) ? 'bg-brand-error' : 'bg-blue-400'}`} style={{width: `${Math.min(100, (m.stock/(m.max_stock || m.maxStock || 1000))*100)}%`}}></div></div></td>
+                  <td className="px-8 py-5"><div className="w-32 h-2.5 bg-slate-900 rounded-full mx-auto overflow-hidden border border-slate-800"><div className={`h-full ${m.stock <= (m.min_stock || m.minStock || 0) ? 'bg-brand-error' : 'bg-blue-400'}`} style={{ width: `${Math.min(100, (m.stock / (m.max_stock || m.maxStock || 1000)) * 100)}%` }}></div></div></td>
                   <td className="px-8 py-5 text-right">
                     <div className="flex justify-end gap-3">
-                      <button onClick={() => setAdjustModal({show: true, material: m, newVal: m.stock.toString()})} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl" title="Ajuste"><Scale size={20}/></button>
-                      <button onClick={() => { setModalMode('view'); setEditingId(m.id); setFormData({...m}); setSearchModal(true); }} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl"><Eye size={20}/></button>
-                      <button onClick={() => { setModalMode('edit'); setEditingId(m.id); setFormData({...m}); setSearchModal(true); }} className="p-3 bg-brand-success/10 text-brand-success rounded-xl"><Edit2 size={20}/></button>
-                      <button onClick={() => { setDeleteIdToRequest(m.id); setIsRequestDeleteAuthModalOpen(true); }} className="p-3 bg-brand-error/10 text-brand-error rounded-xl"><Trash2 size={20}/></button>
+                      <button onClick={() => setAdjustModal({ show: true, material: m, newVal: m.stock.toString() })} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl" title="Ajuste"><Scale size={20} /></button>
+                      <button onClick={() => { setModalMode('view'); setEditingId(m.id); setFormData({ ...m }); setSearchModal(true); }} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl"><Eye size={20} /></button>
+                      <button onClick={() => { setModalMode('edit'); setEditingId(m.id); setFormData({ ...m }); setSearchModal(true); }} className="p-3 bg-brand-success/10 text-brand-success rounded-xl"><Edit2 size={20} /></button>
+                      <button onClick={() => handleDelete(m)} className="p-3 bg-brand-error/10 text-brand-error rounded-xl"><Trash2 size={20} /></button>
                     </div>
                   </td>
                 </tr>
@@ -187,18 +225,18 @@ const Inventory: React.FC = () => {
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl my-auto border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Package className="text-brand-success" size={24} /> {modalMode === 'create' ? 'Novo Material' : modalMode === 'edit' ? 'Editar Material' : 'Ficha Técnica'}</h2><button onClick={() => setSearchModal(false)} className="p-2 text-slate-500 hover:text-white transition-all"><X size={32} /></button></div>
             <form onSubmit={handleSave} className="p-8 space-y-8">
-              <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Nome do Material</label><input required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value.toUpperCase()})} placeholder="Ex: Cobre Mel" /></div>
+              <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Nome do Material</label><input required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value.toUpperCase() })} placeholder="Ex: Cobre Mel" /></div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Unidade</label><select disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value as any})}><option value="KG">QUILOGRAMA (KG)</option><option value="UN">UNIDADE (UN)</option></select></div>
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Compra</label><input type="number" step="0.01" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.buyPrice || formData.buy_price || 0} onChange={e => setFormData({...formData, buyPrice: parseFloat(e.target.value)})} /></div>
+                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Unidade</label><select disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value as any })}><option value="KG">QUILOGRAMA (KG)</option><option value="UN">UNIDADE (UN)</option></select></div>
+                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Compra</label><input type="number" step="0.01" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.buyPrice || formData.buy_price || 0} onChange={e => setFormData({ ...formData, buyPrice: parseFloat(e.target.value) })} /></div>
               </div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Mínimo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.minStock || formData.min_stock || 0} onChange={e => setFormData({...formData, minStock: parseFloat(e.target.value)})} /></div>
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Máximo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.maxStock || formData.max_stock || 0} onChange={e => setFormData({...formData, maxStock: parseFloat(e.target.value)})} /></div>
+                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Mínimo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.minStock || formData.min_stock || 0} onChange={e => setFormData({ ...formData, minStock: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Máximo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.maxStock || formData.max_stock || 0} onChange={e => setFormData({ ...formData, maxStock: parseFloat(e.target.value) })} /></div>
               </div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Venda</label><input type="number" step="0.01" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.sellPrice || formData.sell_price || 0} onChange={e => setFormData({...formData, sellPrice: parseFloat(e.target.value)})} /></div>
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Quantidade Atual</label><input type="number" step="0.001" required disabled={modalMode === 'view' || modalMode === 'edit'} className={`w-full border-2 p-5 rounded-2xl text-white font-bold ${modalMode === 'edit' || modalMode === 'view' ? 'bg-slate-800/50 border-slate-700 opacity-60' : 'bg-slate-900 border-slate-800'}`} value={formData.stock} onChange={e => setFormData({...formData, stock: parseFloat(e.target.value)})} /></div>
+                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Venda</label><input type="number" step="0.01" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.sellPrice || formData.sell_price || 0} onChange={e => setFormData({ ...formData, sellPrice: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Quantidade Atual</label><input type="number" step="0.001" required disabled={modalMode === 'view' || modalMode === 'edit'} className={`w-full border-2 p-5 rounded-2xl text-white font-bold ${modalMode === 'edit' || modalMode === 'view' ? 'bg-slate-800/50 border-slate-700 opacity-60' : 'bg-slate-900 border-slate-800'}`} value={formData.stock} onChange={e => setFormData({ ...formData, stock: parseFloat(e.target.value) })} /></div>
               </div>
               {modalMode !== 'view' && <button type="submit" className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-sm tracking-[0.2em] shadow-2xl active:scale-95">{modalMode === 'edit' ? 'PEDIR LIBERAÇÃO ALTERAÇÃO' : 'SALVAR CADASTRO'}</button>}
             </form>
@@ -209,35 +247,35 @@ const Inventory: React.FC = () => {
       {/* MODAL AJUSTE RÁPIDO */}
       {adjustModal.show && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
-           <div className="enterprise-card w-full max-w-sm p-8 border-slate-700">
-             <h2 className="text-xl font-black text-white uppercase text-center mb-6">Ajustar Saldo</h2>
-             <p className="text-[10px] text-slate-500 font-black uppercase text-center mb-2">{adjustModal.material?.name}</p>
-             <input autoFocus type="number" step="0.001" className="w-full bg-slate-950 border-2 border-slate-800 p-5 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success mb-6" value={adjustModal.newVal} onChange={e => setAdjustModal({...adjustModal, newVal: e.target.value})} />
-             <div className="flex gap-3">
-               <button onClick={() => setAdjustModal({show: false, material: null, newVal: ''})} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px]">Cancelar</button>
-               <button onClick={handleAdjustStock} className="flex-1 py-4 bg-brand-success text-white rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20">Solicitar</button>
-             </div>
-           </div>
+          <div className="enterprise-card w-full max-w-sm p-8 border-slate-700">
+            <h2 className="text-xl font-black text-white uppercase text-center mb-6">Ajustar Saldo</h2>
+            <p className="text-[10px] text-slate-500 font-black uppercase text-center mb-2">{adjustModal.material?.name}</p>
+            <input autoFocus type="number" step="0.001" className="w-full bg-slate-950 border-2 border-slate-800 p-5 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success mb-6" value={adjustModal.newVal} onChange={e => setAdjustModal({ ...adjustModal, newVal: e.target.value })} />
+            <div className="flex gap-3">
+              <button onClick={() => setAdjustModal({ show: false, material: null, newVal: '' })} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px]">Cancelar</button>
+              <button onClick={handleAdjustStock} className="flex-1 py-4 bg-brand-success text-white rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20">Solicitar</button>
+            </div>
+          </div>
         </div>
       )}
 
-      <RequestAuthorizationModal 
-        isOpen={isRequestEditAuthModalOpen} 
-        onClose={() => setIsRequestEditAuthModalOpen(false)} 
-        actionKey="EDITAR_MATERIAL" 
-        actionLabel={`OP: EDIÇÃO DE MATERIAL | ID: #${editToRequest?.id?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Edição de preços e configurações técnicas do material ${editToRequest?.name || 'MATERIAL'}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editToRequest?.id} | JSON: ${JSON.stringify(editToRequest?.data)}`} 
+      <RequestAuthorizationModal
+        isOpen={isRequestEditAuthModalOpen}
+        onClose={() => setIsRequestEditAuthModalOpen(false)}
+        actionKey="EDITAR_MATERIAL"
+        actionLabel={`OP: EDIÇÃO DE MATERIAL | ID: #${editToRequest?.id?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Edição de preços e configurações técnicas do material ${editToRequest?.name || 'MATERIAL'}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editToRequest?.id} | JSON: ${JSON.stringify(editToRequest?.data)}`}
       />
-      <RequestAuthorizationModal 
-        isOpen={isRequestDeleteAuthModalOpen} 
-        onClose={() => setIsRequestDeleteAuthModalOpen(false)} 
-        actionKey="EXCLUIR_MATERIAL" 
-        actionLabel={`OP: EXCLUSÃO DE MATERIAL | ID: #${deleteIdToRequest?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Remoção permanente do cadastro do material ${materials.find(m => m.id === deleteIdToRequest)?.name || 'MATERIAL'}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${deleteIdToRequest}`} 
+      <RequestAuthorizationModal
+        isOpen={isRequestDeleteAuthModalOpen}
+        onClose={() => setIsRequestDeleteAuthModalOpen(false)}
+        actionKey="EXCLUIR_MATERIAL"
+        actionLabel={`OP: EXCLUSÃO DE MATERIAL | ID: #${deleteIdToRequest?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Remoção permanente do cadastro do material ${materials.find(m => m.id === deleteIdToRequest)?.name || 'MATERIAL'}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${deleteIdToRequest}`}
       />
-      <RequestAuthorizationModal 
-        isOpen={isRequestAdjustAuthModalOpen} 
-        onClose={() => setIsRequestAdjustAuthModalOpen(false)} 
-        actionKey="AJUSTAR_ESTOQUE" 
-        actionLabel={`OP: AJUSTE DE ESTOQUE | ID: #${adjustToRequest?.id?.slice(-5) || '00000'} | CTX: INVENTÁRIO REAL | DET: Correção manual da quantidade em estoque do material ${adjustToRequest?.name || 'MATERIAL'} para igualar ao pátio. | VAL: ${(adjustToRequest?.oldVal || 0).toLocaleString('pt-BR')} para ${(adjustToRequest?.val || 0).toLocaleString('pt-BR')} | REAL_ID: ${adjustToRequest?.id}`} 
+      <RequestAuthorizationModal
+        isOpen={isRequestAdjustAuthModalOpen}
+        onClose={() => setIsRequestAdjustAuthModalOpen(false)}
+        actionKey="AJUSTAR_ESTOQUE"
+        actionLabel={`OP: AJUSTE DE ESTOQUE | ID: #${adjustToRequest?.id?.slice(-5) || '00000'} | CTX: INVENTÁRIO REAL | DET: Correção manual da quantidade em estoque do material ${adjustToRequest?.name || 'MATERIAL'} para igualar ao pátio. | VAL: ${(adjustToRequest?.oldVal || 0).toLocaleString('pt-BR')} para ${(adjustToRequest?.val || 0).toLocaleString('pt-BR')} | REAL_ID: ${adjustToRequest?.id}`}
       />
     </div>
   );
