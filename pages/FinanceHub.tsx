@@ -8,7 +8,7 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, AlertCircle, X, PlusCircle,
   FileText, Download, Printer, User as UserIcon, Receipt, Zap, Scale,
   CreditCard, Banknote, Landmark as BankIcon, Save, Loader2, Coins,
-  Calendar, Eye, Trash2, Edit, RotateCcw
+  Calendar, Eye, Trash2, Edit, RotateCcw, Plus, PlusSquare
 } from 'lucide-react';
 import { TableLayout } from '../components/FinanceTableLayout';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
@@ -72,9 +72,16 @@ const FinanceHub: React.FC = () => {
   const [isRequestEditAuthModalOpen, setIsRequestEditAuthModalOpen] = useState(false);
   const [isRequestDeleteAuthModalOpen, setIsRequestDeleteAuthModalOpen] = useState(false);
   const [txToAuthorize, setTxToAuthorize] = useState<WalletTransaction | null>(null);
+  const [recordToReverse, setRecordToReverse] = useState<FinancialRecord | null>(null);
   const [manualEntryToAuthorize, setManualEntryToAuthorize] = useState<any>(null);
   const [isRequestManualAuthModalOpen, setIsRequestManualAuthModalOpen] = useState(false);
   const [isRequestReverseAuthModalOpen, setIsRequestReverseAuthModalOpen] = useState(false);
+  const [isRequestReverseLiquidationAuthModalOpen, setIsRequestReverseLiquidationAuthModalOpen] = useState(false);
+  const [recordToEdit, setRecordToEdit] = useState<FinancialRecord | null>(null);
+  const [recordToDelete, setRecordToDelete] = useState<FinancialRecord | null>(null);
+  const [pendingEditPayload, setPendingEditPayload] = useState<any | null>(null);
+  const [isRequestEditLiquidationAuthModalOpen, setIsRequestEditLiquidationAuthModalOpen] = useState(false);
+  const [isRequestDeleteLiquidationAuthModalOpen, setIsRequestDeleteLiquidationAuthModalOpen] = useState(false);
   const processedAuthIds = useRef(new Set<string>());
 
   const [isLoading, setIsLoading] = useState(false);
@@ -218,19 +225,283 @@ const FinanceHub: React.FC = () => {
     id: '' // Para ediÃ§Ã£o
   });
 
-  const parseNumericString = (str: string): number => {
-    if (!str) return 0;
-    if (typeof str === 'number') return str;
-    const clean = str.replace(/[^\d.,]/g, '');
-    if (clean.includes(',')) {
-      const normalized = clean.replace(/\./g, '').replace(',', '.');
-      return parseFloat(normalized) || 0;
+  // FINANCE CASHIER STATES
+  const [activeFinanceSession, setActiveFinanceSession] = useState<CashierSession | null>(null);
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
+  const [financeOpeningBalance, setFinanceOpeningBalance] = useState('');
+
+  const handleOpenFinanceShift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    // Check if user already has an open POS or Finance session
+    const existingSession = cashierSessions.find(s =>
+      (s.userId === currentUser.id || s.user_id === currentUser.id) &&
+      s.status === 'open'
+    );
+
+    if (existingSession) {
+      alert("Você já possui um caixa aberto (PDV ou Financeiro). Feche-o antes de abrir outro.");
+      return;
     }
-    const parts = clean.split('.');
-    if (parts.length > 2) {
-      return parseFloat(clean.replace(/\./g, '')) || 0;
+
+    try {
+      const balance = parseNumericString(financeOpeningBalance);
+      const newSession: Partial<CashierSession> = {
+        companyId: companyId!,
+        company_id: companyId!,
+        userId: currentUser.id,
+        user_id: currentUser.id,
+        userName: currentUser.name,
+        user_name: currentUser.name,
+        type: 'finance', // IMPORTANTE: Identifica como Caixa Financeiro
+        status: 'open',
+        openingTime: db.getNowISO(),
+        opening_time: db.getNowISO(),
+        openingBalance: balance,
+        opening_balance: balance
+      };
+
+      await db.insert('cashierSessions', newSession);
+      setShowOpenShiftModal(false);
+      setFinanceOpeningBalance('');
+      alert("Caixa Financeiro aberto com sucesso!");
+      triggerRefresh();
+    } catch (err: any) {
+      alert("Erro ao abrir caixa: " + err.message);
     }
-    return parseFloat(clean) || 0;
+  };
+
+  const handleCloseFinanceShift = () => {
+    if (!activeFinanceSession) return;
+    // Reuse existing audit logic
+    setAuditModal({
+      show: true,
+      session: activeFinanceSession,
+      bankNameCash: '',
+      bankNameCheck: '',
+      auditedBreakdown: {
+        physical_cash: '0',
+        physical_check: '0'
+      }
+    });
+  };
+
+  // NEW TITLE (MANUAL PAYABLE/RECEIVABLE) STATE
+  const [showNewTitleModal, setShowNewTitleModal] = useState(false);
+  const [newTitleForm, setNewTitleForm] = useState({
+    natureza: 'SAIDA' as 'ENTRADA' | 'SAIDA',
+    tipo: 'despesa' as 'despesa' | 'entrada' | 'pagamento', // Default to expense
+    valor: '',
+    categoria: '',
+    parceiro: '',
+    vencimento: db.getToday(),
+    descricao: ''
+  });
+
+  const handleCreateTitle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    // Validate
+    if (!newTitleForm.valor || !newTitleForm.categoria || !newTitleForm.parceiro || !newTitleForm.descricao) {
+      alert("Preencha todos os campos obrigatórios.");
+      return;
+    }
+
+    try {
+      const amount = parseNumericString(newTitleForm.valor);
+
+      const payload: any = {
+        company_id: companyId!,
+        companyId: companyId!, // Include both cases for compatibility
+        userId: currentUser.id,
+        user_id: currentUser.id,
+        tipo: newTitleForm.tipo,
+        natureza: newTitleForm.natureza,
+        categoria: newTitleForm.categoria,
+        parceiro_id: newTitleForm.parceiro,
+        parceiroId: newTitleForm.parceiro,
+        valor: amount,
+        description: newTitleForm.descricao.toUpperCase(),
+        due_date: newTitleForm.vencimento,
+        dueDate: newTitleForm.vencimento,
+        status: 'pending',
+        paymentMethod: 'A PRAZO',
+        payment_method: 'A PRAZO',
+        updated_at: db.getNowISO()
+      };
+
+      if ((newTitleForm as any).id) {
+        // UPDATE: Agora pede AUTORIZAÇÃO antes de efetivar a alteração
+        payload.id = (newTitleForm as any).id;
+        setPendingEditPayload(payload);
+        setIsRequestEditLiquidationAuthModalOpen(true);
+        return;
+      } else {
+        // INSERT
+        payload.created_at = db.getNowISO();
+        // Link to Finance Session if open (Fixing previous issue)
+        payload.caixaId = activeFinanceSession ? activeFinanceSession.id : null;
+        payload.caixa_id = activeFinanceSession ? activeFinanceSession.id : null;
+
+        await db.insert('financials', payload);
+        alert("Título criado com sucesso!");
+      }
+
+      setShowNewTitleModal(false);
+      setNewTitleForm({
+        natureza: 'SAIDA',
+        tipo: 'despesa',
+        valor: '',
+        categoria: '',
+        parceiro: '',
+        vencimento: db.getToday(),
+        descricao: '',
+        id: ''
+      } as any);
+      triggerRefresh();
+    } catch (err: any) {
+      alert("Erro ao salvar título: " + err.message);
+    }
+  };
+
+  // DELETE TITLE (Soft Delete / Reverse)
+  const handleDeleteTitle = async (record: FinancialRecord) => {
+    // SEMPRE pede autorização para excluir no Hub Financeiro
+    setRecordToDelete(record);
+    setIsRequestDeleteLiquidationAuthModalOpen(true);
+  };
+
+  // EDIT TITLE (Open Modal with Data)
+  const handleEditTitle = (record: FinancialRecord) => {
+    // Agora abre o modal direto, e pede senha ao SALVAR (no handleCreateTitle)
+    setRecordToEdit(record);
+    setNewTitleForm({
+      natureza: record.natureza || (record.tipo === 'despesa' ? 'SAIDA' : 'ENTRADA'),
+      tipo: (record.tipo as any) || 'despesa',
+      valor: record.valor.toFixed(2).replace('.', ','),
+      categoria: record.categoria,
+      parceiro: record.parceiro_id || '',
+      vencimento: record.dueDate || record.due_date || db.getToday(),
+      descricao: record.description,
+      id: record.id // Add ID for update logic
+    } as any);
+    setShowNewTitleModal(true);
+  };
+
+  // REVERSE LIQUIDATION (Status Paid -> Pending)
+  const handleReverseLiquidation = (record: FinancialRecord) => {
+    if (record.status !== 'paid' && !record.liquidation_date) {
+      alert('Apenas títulos liquidados podem ser estornados.');
+      return;
+    }
+    setRecordToReverse(record);
+    setIsRequestReverseLiquidationAuthModalOpen(true);
+  };
+
+  const executeReverseLiquidation = async (record: FinancialRecord) => {
+    try {
+      // 1. Update the Financial Record
+      await db.update('financials', record.id, {
+        status: 'pending',
+        liquidation_date: null,
+        liquidationDate: null,
+        caixa_id: null,
+        caixaId: null,
+        payment_term_id: null,
+        paymentTermId: null,
+        forma_pagamento: null,
+        updated_at: db.getNowISO()
+      });
+
+      // 2. If it has a linked Transaction (PDV Sale/Purchase), update it too
+      if (record.transaction_id || (record as any).transactionId) {
+        const txId = record.transaction_id || (record as any).transactionId;
+        try {
+          await db.update('transactions', txId, {
+            status: 'pending', // or 'processing' depending on how POS handles it
+            updated_at: db.getNowISO()
+          });
+        } catch (txErr) {
+          console.warn("Could not find/update linked transaction:", txId);
+        }
+      }
+
+      await db.logAction(
+        companyId,
+        currentUser?.id || '',
+        currentUser?.name || 'Sistema',
+        'FINANCE_LIQUIDATION_REVERSAL',
+        `OP: Estorno de Liquidação | CTX: Finance Hub | DET: Estornado título ID: ${record.id} | Desc: ${record.description} | Valor: R$ ${record.valor.toFixed(2)}`
+      );
+
+      alert('Liquidação estornada com sucesso! O título e o histórico foram atualizados.');
+
+      // Force a re-fetch of everything
+      triggerRefresh();
+    } catch (err: any) {
+      alert('Erro ao estornar: ' + err.message);
+    }
+  };
+
+  const executeCommitEditTitle = async (payload: any) => {
+    try {
+      if (!payload.id) throw new Error("ID do título não encontrado no payload.");
+
+      const titleId = payload.id;
+      // Remove id from payload before update
+      const { id, ...updateData } = payload;
+
+      await db.update('financials', titleId, updateData);
+
+      await db.logAction(
+        companyId,
+        currentUser?.id || '',
+        currentUser?.name || 'Sistema',
+        'FINANCE_TITLE_EDIT',
+        `OP: Edição de Título | CTX: Finance Hub | DET: Atualizado título ID: ${titleId} | Desc: ${payload.description} | Valor: R$ ${payload.valor.toFixed(2)}`
+      );
+
+      alert("Título atualizado com sucesso!");
+      setShowNewTitleModal(false);
+      setNewTitleForm({
+        natureza: 'SAIDA',
+        tipo: 'despesa',
+        valor: '',
+        categoria: '',
+        parceiro: '',
+        vencimento: db.getToday(),
+        descricao: '',
+        id: ''
+      } as any);
+      triggerRefresh();
+    } catch (err: any) {
+      alert("Erro ao salvar atualização: " + err.message);
+    }
+  };
+
+  const executeDeleteTitle = async (record: FinancialRecord) => {
+    try {
+      await db.update('financials', record.id, {
+        status: 'reversed',
+        is_reversed: true,
+        updated_at: db.getNowISO()
+      });
+
+      await db.logAction(
+        companyId,
+        currentUser?.id || '',
+        currentUser?.name || 'Sistema',
+        'FINANCE_TITLE_DELETE',
+        `OP: Exclusão de Título | CTX: Finance Hub | DET: Excluído título ID: ${record.id} | Desc: ${record.description} | Valor: R$ ${record.valor.toFixed(2)}`
+      );
+
+      alert('Título excluído com sucesso!');
+      triggerRefresh();
+    } catch (err: any) {
+      alert('Erro ao excluir: ' + err.message);
+    }
   };
 
   const loadData = useCallback(async () => {
@@ -240,7 +511,7 @@ const FinanceHub: React.FC = () => {
     try {
       const allPartners = db.queryTenant<Partner>('partners', companyId);
 
-      // FILTRAGEM RIGOROSA DE TERMOS PARA O HUB (POLÃTICA ENTERPRISE)
+      // FILTRagem RIGOROSA DE TERMOS PARA O HUB (POLÍTICA ENTERPRISE)
       const allTermsRaw = db.queryTenant<PaymentTerm>('paymentTerms', companyId, () => true);
 
       const pTerms = allTermsRaw.filter((t: PaymentTerm) =>
@@ -259,7 +530,7 @@ const FinanceHub: React.FC = () => {
         t.show_in_bank_manual === true || (t as any).showInBankManual === true)
       );
 
-      // Termos ESPECÃFICOS para LanÃ§amento BancÃ¡rio Manual (Pedido do UsuÃ¡rio)
+      // Termos ESPECÍFICOS para Lançamento Bancário Manual (Pedido do Usuário)
       const bManualTerms = allTermsRaw.filter((t: PaymentTerm) =>
         (t.show_in_bank_manual === true || (t as any).showInBankManual === true)
       );
@@ -279,18 +550,40 @@ const FinanceHub: React.FC = () => {
       setTeamUsers(users);
 
       if (client && companyId) {
-        const { data: finData } = await client.from('financials').select('*').eq('company_id', companyId);
-        if (finData) setAllFinancialRecords(finData.map(db.normalize));
+        try {
+          const { data: finData, error: finError } = await client.from('financials').select('*').eq('company_id', companyId);
+          if (finError) throw finError;
+          if (finData) setAllFinancialRecords(finData.map(db.normalize));
 
-        const { data: walletData } = await client.from('wallet_transactions').select('*').eq('company_id', companyId).order('created_at', { ascending: false });
-        if (walletData) setWalletTransactions(walletData.map(db.normalize));
+          const { data: walletData, error: walletError } = await client.from('wallet_transactions').select('*').eq('company_id', companyId).order('created_at', { ascending: false });
+          if (walletError) throw walletError;
+          if (walletData) setWalletTransactions(walletData.map(db.normalize));
 
-        const { data: sessionData } = await client.from('cashier_sessions').select('*').eq('company_id', companyId).order('opening_time', { ascending: false });
-        if (sessionData) {
-          const normSessions = sessionData.map(db.normalize);
-          setCashierSessions(normSessions);
-          const myActive = normSessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
+          const { data: sessionData, error: sessionError } = await client.from('cashier_sessions').select('*').eq('company_id', companyId).order('opening_time', { ascending: false });
+          if (sessionError) throw sessionError;
+          if (sessionData) {
+            const normSessions = sessionData.map(db.normalize);
+            setCashierSessions(normSessions);
+            const myActive = normSessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
+            setActiveSession(myActive || null);
+
+            // Sets Active Finance Session if matches type
+            if (myActive && myActive.type === 'finance') {
+              setActiveFinanceSession(myActive);
+            } else {
+              setActiveFinanceSession(null);
+            }
+          }
+        } catch (fetchErr: any) {
+          console.warn("Supabase fetch failed (Network/Auth), falling back to local storage:", fetchErr.message);
+          // Fallback to local data
+          setAllFinancialRecords(db.queryTenant<FinancialRecord>('financials', companyId));
+          setWalletTransactions(db.queryTenant<WalletTransaction>('walletTransactions' as any, companyId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+          const sessions = db.queryTenant<CashierSession>('cashierSessions', companyId);
+          setCashierSessions(sessions);
+          const myActive = sessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
           setActiveSession(myActive || null);
+          setActiveFinanceSession(myActive?.type === 'finance' ? myActive : null);
         }
       } else {
         setAllFinancialRecords(db.queryTenant<FinancialRecord>('financials', companyId));
@@ -299,9 +592,16 @@ const FinanceHub: React.FC = () => {
         setCashierSessions(sessions);
         const myActive = sessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
         setActiveSession(myActive || null);
+
+        // Sets Active Finance Session if matches type
+        if (myActive && myActive.type === 'finance') {
+          setActiveFinanceSession(myActive);
+        } else {
+          setActiveFinanceSession(null);
+        }
       }
     } catch (err: any) {
-      console.error("Erro ao sincronizar Hub Financeiro:", err.message || err);
+      console.error("Erro fatal ao sincronizar Hub Financeiro:", err.message || err);
     } finally {
       setIsLoading(false);
     }
@@ -336,6 +636,32 @@ const FinanceHub: React.FC = () => {
             const txId = req.action_label.split('ID: ')[1];
             const tx = walletTransactions.find(t => t.id === txId || t.uuid === txId);
             if (tx) executeReverseSystemTransaction(tx);
+          } else if (req.action_key === 'ESTORNAR_LIQUIDACAO') {
+            const match = req.action_label.match(/ID: ([a-f0-9-]+)/i);
+            if (match && match[1]) {
+              const record = allFinancialRecords.find(f => f.id === match[1]);
+              if (record) {
+                executeReverseLiquidation(record);
+              } else {
+                console.error("ESTORNAR_LIQUIDACAO: Título não encontrado no estado local:", match[1]);
+              }
+            }
+          } else if (req.action_key === 'SALVAR_EDICAO_FINANCEIRO') {
+            const jsonPart = req.action_label.split('JSON: ')[1];
+            if (jsonPart) {
+              const data = JSON.parse(jsonPart);
+              executeCommitEditTitle(data);
+            }
+          } else if (req.action_key === 'EXCLUIR_LIQUIDACAO') {
+            const match = req.action_label.match(/ID: ([a-f0-9-]+)/i);
+            if (match && match[1]) {
+              const record = allFinancialRecords.find(f => f.id === match[1]);
+              if (record) {
+                executeDeleteTitle(record);
+              } else {
+                console.error("EXCLUIR_LIQUIDACAO: Título não encontrado no estado local:", match[1]);
+              }
+            }
           }
           // Mark as PROCESSED to avoid re-triggering
           await db.update('authorization_requests' as any, req.id, { status: 'PROCESSED' } as any);
@@ -343,7 +669,7 @@ const FinanceHub: React.FC = () => {
         } catch (e) { console.error("Error processing auth request", e); }
       });
     }
-  }, [pendingRequests, currentUser, walletTransactions]);
+  }, [pendingRequests, currentUser, walletTransactions, allFinancialRecords]);
 
   // Realtime Subscriptions for Auto-Refresh
   useEffect(() => {
@@ -381,6 +707,26 @@ const FinanceHub: React.FC = () => {
       client.removeChannel(channel);
     };
   }, [companyId]);
+
+  // Safety Net: Polling every 10 seconds to ensure consistency
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log("Polling: Auto-refreshing FinanceHub data...");
+      triggerRefresh();
+    }, 10000);
+
+    const handleFocus = () => {
+      console.log("Window Focus: Refreshing FinanceHub...");
+      triggerRefresh();
+    };
+
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
 
 
 
@@ -444,6 +790,18 @@ const FinanceHub: React.FC = () => {
       return matchDate && matchOperator && matchSessionId && matchStatus;
     });
   }, [cashierSessions, auditDateStart, auditDateEnd, auditOperatorFilter, auditFilterSessionId, auditFilterStatus]);
+
+  const sessionBaixas = useMemo(() => {
+    if (!activeFinanceSession) return [];
+    // Show ALL records linked to this session (both Liquidations and new Provisions)
+    return allFinancialRecords.filter(r =>
+      r.caixa_id === activeFinanceSession.id
+    ).sort((a, b) => {
+      const timeA = new Date(a.liquidation_date || a.created_at).getTime();
+      const timeB = new Date(b.liquidation_date || b.created_at).getTime();
+      return timeB - timeA;
+    });
+  }, [allFinancialRecords, activeFinanceSession]);
 
   /**
    * @google/genai Senior Frontend Engineer: 
@@ -556,6 +914,11 @@ const FinanceHub: React.FC = () => {
       // Re-find term just in case, or use ID directly
       // Assuming data.payment_term_id is the correct ID/UUID
 
+      if (!activeFinanceSession) {
+        alert("É necessário abrir o Caixa Financeiro para realizar esta ação.");
+        return;
+      }
+
       await db.insert<WalletTransaction>('walletTransactions' as any, {
         company_id: companyId!,
         user_id: currentUser?.id,
@@ -566,7 +929,9 @@ const FinanceHub: React.FC = () => {
         valor_entrada: isEntry ? amount : 0,
         valor_saida: isEntry ? 0 : amount,
         saldo_real: isEntry ? lastBalance + amount : lastBalance - amount,
-        created_at: db.getNowISO()
+        created_at: db.getNowISO(),
+        operador_id: activeFinanceSession.userId || activeFinanceSession.user_id, // Link to Session
+        operador_name: activeFinanceSession.userName || activeFinanceSession.user_name // Link to Session
       });
 
       if (data.id) {
@@ -634,7 +999,14 @@ const FinanceHub: React.FC = () => {
 
   const handleProcessLiquidation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!liquidationModal.record || !activeSession || isLiquidating) return;
+
+    // Check for Finance Shift specifically
+    if (!activeFinanceSession) {
+      alert("É necessário abrir o Caixa Financeiro para liquidar títulos.");
+      return;
+    }
+
+    if (!liquidationModal.record || isLiquidating) return;
     setIsLiquidating(true);
     try {
       await db.update('financials', liquidationModal.record.id, {
@@ -642,7 +1014,7 @@ const FinanceHub: React.FC = () => {
         paymentTermId: liquidationModal.termId,
         liquidation_date: db.getNowISO(),
         due_date: liquidationModal.dueDate,
-        caixa_id: activeSession.id
+        caixa_id: activeFinanceSession.id // Use Finance Session ID
       });
       setLiquidationModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' });
       triggerRefresh();
@@ -971,11 +1343,34 @@ const FinanceHub: React.FC = () => {
           <p className="text-slate-400 text-[10px] md:text-sm mt-1 font-medium uppercase tracking-widest leading-relaxed">Movimentações operacionais e liquidez cloud.</p>
         </div>
         <div className="flex items-center gap-3">
+          {activeFinanceSession ? (
+            <button
+              onClick={handleCloseFinanceShift}
+              className="px-4 py-2 bg-brand-warning/10 text-brand-warning border border-brand-warning/30 hover:bg-brand-warning/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
+            >
+              <ShieldCheck size={16} /> Fechar Caixa Financeiro #{activeFinanceSession.id.slice(0, 6).toUpperCase()}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowOpenShiftModal(true)}
+              className="px-4 py-2 bg-brand-success/10 text-brand-success border border-brand-success/30 hover:bg-brand-success/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
+            >
+              <Zap size={16} /> Abrir Caixa Financeiro
+            </button>
+          )}
+
+          {activeFinanceSession && (
+            <div className="px-3 py-1.5 bg-brand-success/10 border border-brand-success/20 rounded-lg flex flex-col items-end">
+              <span className="text-[8px] font-black text-brand-success uppercase tracking-widest">Turno Ativo</span>
+              <span className="text-[10px] font-bold text-white">#{activeFinanceSession.id.slice(0, 6).toUpperCase()}</span>
+            </div>
+          )}
+
           <div className="enterprise-card px-4 py-2 flex items-center gap-3 border-slate-800 bg-slate-900/50">
             <Landmark size={16} className="text-blue-400" />
             <div className="hidden sm:block">
               <p className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">Saldo Bancário</p>
-              <p className="text-sm font-black text-white">R$ {stats.currentWalletBalance.toLocaleString()}</p>
+              <p className="text-sm font-black text-white">R$ {stats.currentWalletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
           </div>
           <button onClick={triggerRefresh} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700 transition-all">
@@ -983,6 +1378,49 @@ const FinanceHub: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* MODAL ABERTURA DE CAIXA FINANCEIRO */}
+      {showOpenShiftModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-brand-card w-full max-w-md rounded-2xl border border-slate-800 shadow-2xl p-6 relative">
+            <button onClick={() => setShowOpenShiftModal(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors">
+              <X size={20} />
+            </button>
+
+            <div className="flex flex-col items-center mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-brand-success/10 flex items-center justify-center text-brand-success border border-brand-success/20 mb-4 shadow-[0_0_30px_-10px_rgba(16,185,129,0.3)]">
+                <Zap size={32} />
+              </div>
+              <h2 className="text-2xl font-black text-white uppercase tracking-tight">Abrir Caixa Financeiro</h2>
+              <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">Sessão Exclusiva para Tesouraria</p>
+            </div>
+
+            <form onSubmit={handleOpenFinanceShift} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Fundo de Troco (Inicial)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">R$</span>
+                  <input
+                    type="text"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white font-black text-lg outline-none focus:border-brand-success transition-all"
+                    placeholder="0,00"
+                    value={financeOpeningBalance}
+                    onChange={e => setFinanceOpeningBalance(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-4 bg-brand-success text-brand-dark rounded-xl font-black uppercase tracking-widest hover:brightness-110 active:scale-[0.98] transition-all shadow-lg flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 size={20} /> Confirmar Abertura
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
         {menuItems
@@ -1036,6 +1474,25 @@ const FinanceHub: React.FC = () => {
                 <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
               </div>
 
+              <button
+                onClick={() => {
+                  setNewTitleForm({
+                    natureza: 'SAIDA',
+                    tipo: 'despesa',
+                    valor: '',
+                    categoria: '',
+                    parceiro: '',
+                    vencimento: db.getToday(),
+                    descricao: '',
+                    id: ''
+                  } as any);
+                  setShowNewTitleModal(true);
+                }}
+                className="bg-brand-success text-brand-dark px-4 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20 hover:scale-105 transition-all flex items-center gap-2"
+              >
+                <Plus size={16} /> Novo Título
+              </button>
+
               <div className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
                 <input type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
@@ -1079,6 +1536,137 @@ const FinanceHub: React.FC = () => {
               </div>
             </div>
           </header>
+
+          {/* NOVO TÃTULO MODAL */}
+          {
+            showNewTitleModal && (
+              <div className="bg-brand-card border-b border-slate-800 p-6 animate-in slide-in-from-top-4 duration-300 shadow-2xl relative z-[101]">
+                <div className="max-w-4xl mx-auto">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
+                      <PlusSquare className="text-brand-success" />
+                      Novo Título (Provisão)
+                    </h3>
+                    <button onClick={() => setShowNewTitleModal(false)} className="text-slate-500 hover:text-white">
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleCreateTitle} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* NATUREZA SWITCH */}
+                    <div className="col-span-1 md:col-span-3 flex justify-center pb-4">
+                      <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setNewTitleForm({ ...newTitleForm, natureza: 'SAIDA', tipo: 'despesa' })}
+                          className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${newTitleForm.natureza === 'SAIDA' ? 'bg-brand-error text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                          A Pagar (Saída)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewTitleForm({ ...newTitleForm, natureza: 'ENTRADA', tipo: 'entrada' })}
+                          className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${newTitleForm.natureza === 'ENTRADA' ? 'bg-brand-success text-brand-dark shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                          A Receber (Entrada)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Categoria</label>
+                      <select
+                        required
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
+                        value={newTitleForm.categoria}
+                        onChange={e => setNewTitleForm({ ...newTitleForm, categoria: e.target.value })}
+                      >
+                        <option value="">SELECIONE...</option>
+                        {financeCategories.filter(c => c.type === (newTitleForm.natureza === 'ENTRADA' ? 'in' : 'out') || c.type === 'both').map(c => (
+                          <option key={c.id} value={c.name}>{c.name.toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Parceiro (Fornecedor/Cliente)</label>
+                      <input
+                        required
+                        type="text"
+                        list="partner-options-new"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
+                        placeholder="Busque o parceiro..."
+                        value={newTitleForm.parceiro && partners.find(p => p.id === newTitleForm.parceiro)?.name || newTitleForm.parceiro} // Mostra nome se tiver ID
+                        onChange={e => {
+                          const val = e.target.value;
+                          const found = partners.find(p => p.name.toUpperCase() === val.toUpperCase());
+                          setNewTitleForm({ ...newTitleForm, parceiro: found ? found.id : val }); // Usa ID se achar, senão texto livre (embora ideal seja ID)
+                        }}
+                      />
+                      <datalist id="partner-options-new">
+                        {partners.map(p => <option key={p.id} value={p.name.toUpperCase()} />)}
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Data de Vencimento</label>
+                      <input
+                        required
+                        type="date"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success [color-scheme:dark]"
+                        value={newTitleForm.vencimento}
+                        onChange={e => setNewTitleForm({ ...newTitleForm, vencimento: e.target.value })}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Valor do Título</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">R$</span>
+                        <input
+                          required
+                          type="text"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 pl-8 text-white font-bold text-xs outline-none focus:border-brand-success"
+                          placeholder="0,00"
+                          value={newTitleForm.valor}
+                          onChange={e => setNewTitleForm({ ...newTitleForm, valor: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Descrição</label>
+                      <input
+                        required
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
+                        placeholder="Ex: CONTA DE LUZ JANEIRO/26"
+                        value={newTitleForm.descricao}
+                        onChange={e => setNewTitleForm({ ...newTitleForm, descricao: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="md:col-span-3 pt-4 border-t border-slate-800 flex justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowNewTitleModal(false)}
+                        className="px-6 py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px] hover:text-white transition-all"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-8 py-3 bg-brand-success text-brand-dark rounded-xl font-black uppercase text-[10px] hover:scale-105 transition-all shadow-lg flex items-center gap-2"
+                      >
+                        <CheckCircle2 size={16} /> Criar Título
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )
+          }
+
           <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
             <div className="max-w-7xl mx-auto space-y-8">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 no-print">
@@ -1122,6 +1710,9 @@ const FinanceHub: React.FC = () => {
                   activeSession={activeSession}
                   isLiquidating={isLiquidating}
                   setLiquidationModal={setLiquidationModal}
+                  onEdit={handleEditTitle}
+                  onDelete={handleDeleteTitle}
+                  onReverse={handleReverseLiquidation}
                 />
               )}
               {(filterType === 'ALL' || filterType === 'SAIDA') && (
@@ -1134,130 +1725,161 @@ const FinanceHub: React.FC = () => {
                   activeSession={activeSession}
                   isLiquidating={isLiquidating}
                   setLiquidationModal={setLiquidationModal}
+                  onEdit={handleEditTitle}
+                  onDelete={handleDeleteTitle}
+                  onReverse={handleReverseLiquidation}
                 />
+              )}
+
+              {activeFinanceSession && sessionBaixas.length > 0 && (
+                <div className="mt-12 pt-8 border-t border-slate-800/50">
+                  <TableLayout
+                    title="Histórico de Movimentações do Turno"
+                    items={sessionBaixas}
+                    icon={CheckCircle2}
+                    iconColor="text-blue-400"
+                    partners={partners}
+                    activeSession={activeFinanceSession}
+                    isLiquidating={false}
+                    setLiquidationModal={() => { }}
+                    onReverse={handleReverseLiquidation}
+                  />
+                </div>
               )}
             </div>
           </main>
-        </div>
+        </div >
       )}
 
       {/* MODAL CONFERÊNCIA */}
-      {activeModal === 'conferencia' && (
-        <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">
-          <header className="bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0 no-print">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-brand-warning/10 flex items-center justify-center text-brand-warning border border-brand-warning/20">
-                <ShieldCheck size={18} />
+      {
+        activeModal === 'conferencia' && (
+          <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">
+            <header className="bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0 no-print">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-brand-warning/10 flex items-center justify-center text-brand-warning border border-brand-warning/20">
+                  <ShieldCheck size={18} />
+                </div>
+                <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
               </div>
-              <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
-            </div>
-            <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-              <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
-                <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
+              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
+                  <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
+                  <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
+                  <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Turno ID..."
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-24"
+                  value={auditFilterSessionId}
+                  onChange={e => setAuditFilterSessionId(e.target.value)}
+                />
+
+                <select
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
+                  value={auditFilterStatus}
+                  onChange={e => setAuditFilterStatus(e.target.value)}
+                >
+                  <option value="all">TODOS STATUS</option>
+                  <option value="open">ABERTO</option>
+                  <option value="closed">FECHADO</option>
+                  <option value="reconciled">CONFERIDO</option>
+                </select>
+
+                <select
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
+                  value={auditOperatorFilter}
+                  onChange={e => setAuditOperatorFilter(e.target.value)}
+                >
+                  <option value="all">TODOS OPERADORES</option>
+                  {teamUsers.map(u => <option key={u.id} value={u.id}>{u.name.toUpperCase()}</option>)}
+                </select>
+
+                <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
+                  <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
+                  <X size={18} />
+                </button>
               </div>
-
-              <input
-                type="text"
-                placeholder="Turno ID..."
-                className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-24"
-                value={auditFilterSessionId}
-                onChange={e => setAuditFilterSessionId(e.target.value)}
-              />
-
-              <select
-                className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
-                value={auditFilterStatus}
-                onChange={e => setAuditFilterStatus(e.target.value)}
-              >
-                <option value="all">TODOS STATUS</option>
-                <option value="open">ABERTO</option>
-                <option value="closed">FECHADO</option>
-                <option value="reconciled">CONFERIDO</option>
-              </select>
-
-              <select
-                className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
-                value={auditOperatorFilter}
-                onChange={e => setAuditOperatorFilter(e.target.value)}
-              >
-                <option value="all">TODOS OPERADORES</option>
-                {teamUsers.map(u => <option key={u.id} value={u.id}>{u.name.toUpperCase()}</option>)}
-              </select>
-
-              <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
-                <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
-                <X size={18} />
-              </button>
-            </div>
-          </header>
-          <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
-            <div className="max-w-7xl mx-auto space-y-6">
-              <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800 bg-slate-900/10">
-                <div className="overflow-x-auto scrollbar-thick">
-                  <table className="w-full text-left min-w-[900px]">
-                    <thead>
-                      <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest bg-slate-900/60 border-b border-slate-800">
-                        <th className="px-6 py-5">Turno (PDV)</th>
-                        <th className="px-6 py-5">Início do Turno</th>
-                        <th className="px-6 py-5">Operador</th>
-                        <th className="px-6 py-5">Auditor</th>
-                        <th className="px-6 py-5 text-right">Saldo Físico</th>
-                        <th className="px-6 py-5 text-center">Status</th>
-                        <th className="px-6 py-5 text-right">Ação</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/40">
-                      {filteredSessions.map(session => (
-                        <tr key={session.id} className="hover:bg-slate-800/20 transition-all text-xs">
-                          <td className="px-6 py-4 font-mono text-slate-500 font-bold">#{session.id.slice(0, 8).toUpperCase()}</td>
-                          <td className="px-6 py-4 font-mono text-slate-400 font-bold">{new Date(session.openingTime || session.opening_time || '').toLocaleString()}</td>
-                          <td className="px-6 py-4 font-black uppercase text-slate-200">{session.userName || session.user_name}</td>
-                          <td className="px-6 py-4 font-black uppercase text-brand-success/80 text-[10px]">{session.reconciledByName || session.reconciled_by_name || '-'}</td>
-                          <td className="px-6 py-4 text-right font-black text-white">R$ {(session.closingBalance || session.closing_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                          <td className="px-6 py-4 text-center">
-                            <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase border shadow-sm ${session.status === 'open' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' :
-                              session.status === 'closed' ? 'bg-brand-warning/10 text-brand-warning border-brand-warning/20' :
-                                'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                              }`}>
-                              {session.status === 'open' ? 'Em Aberto' : session.status === 'closed' ? 'Aguardando Conferência' : 'Conferido'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => setAuditModal({
-                                  show: true,
-                                  session,
-                                  bankNameCash: session.status === 'reconciled' ? 'RECONCILIADO' : '',
-                                  bankNameCheck: session.status === 'reconciled' ? 'RECONCILIADO' : '',
-                                  auditedBreakdown: (session.reconciledBreakdown || session.reconciled_breakdown || session.physicalBreakdown || session.physical_breakdown || {}) as any,
-                                  readOnly: true
-                                })}
-                                className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all border border-slate-700/50 hover:border-slate-600 shadow-sm"
-                                title="Visualizar Detalhes"
-                              >
-                                <Eye size={16} />
-                              </button>
-                              {session.status === 'closed' && (
-                                <button onClick={() => setAuditModal({ show: true, session, bankNameCash: '', bankNameCheck: '', auditedBreakdown: (session.physicalBreakdown || session.physical_breakdown || {}) as any })} className="px-5 py-2 bg-brand-warning text-black rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-warning/20 hover:scale-105 transition-all whitespace-nowrap">Conferir Turno</button>
-                              )}
-                            </div>
-                          </td>
+            </header>
+            <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
+              <div className="max-w-7xl mx-auto space-y-6">
+                <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800 bg-slate-900/10">
+                  <div className="overflow-x-auto scrollbar-thick">
+                    <table className="w-full text-left min-w-[900px]">
+                      <thead>
+                        <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest bg-slate-900/60 border-b border-slate-800">
+                          <th className="px-6 py-5">Turno (ID)</th>
+                          <th className="px-6 py-5">Tipo</th>
+                          <th className="px-6 py-5">Início do Turno</th>
+                          <th className="px-6 py-5">Operador</th>
+                          <th className="px-6 py-5">Auditor</th>
+                          <th className="px-6 py-5 text-right">Saldo Físico</th>
+                          <th className="px-6 py-5 text-center">Status</th>
+                          <th className="px-6 py-5 text-right">Ação</th>
                         </tr>
-                      ))}
-                      {filteredSessions.length === 0 && (
-                        <tr><td colSpan={5} className="py-20 text-center text-slate-600 italic uppercase font-bold text-[10px]">Nenhum turno localizado para auditoria</td></tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {filteredSessions.map(session => (
+                          <tr key={session.id} className="hover:bg-slate-800/20 transition-all text-xs">
+                            <td className="px-6 py-4 font-mono text-slate-500 font-bold">
+                              #{session.id.slice(0, 8).toUpperCase()}
+                            </td>
+                            <td className="px-6 py-4">
+                              {session.type === 'finance' ? (
+                                <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase">FINANCEIRO</span>
+                              ) : (
+                                <span className="bg-slate-800/50 text-slate-400 border border-slate-700/50 px-2 py-0.5 rounded text-[9px] font-black uppercase">PDV</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 font-mono text-slate-400 font-bold">{new Date(session.openingTime || session.opening_time || '').toLocaleString()}</td>
+                            <td className="px-6 py-4 font-black uppercase text-slate-200">{session.userName || session.user_name}</td>
+                            <td className="px-6 py-4 font-black uppercase text-brand-success/80 text-[10px]">{session.reconciledByName || session.reconciled_by_name || '-'}</td>
+                            <td className="px-6 py-4 text-right font-black text-white">R$ {(session.closingBalance || session.closing_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td className="px-6 py-4 text-center">
+                              <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase border shadow-sm ${session.status === 'open' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' :
+                                session.status === 'closed' ? 'bg-brand-warning/10 text-brand-warning border-brand-warning/20' :
+                                  'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                                }`}>
+                                {session.status === 'open' ? 'Em Aberto' : session.status === 'closed' ? 'Aguardando Conferência' : 'Conferido'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => setAuditModal({
+                                    show: true,
+                                    session,
+                                    bankNameCash: session.status === 'reconciled' ? 'RECONCILIADO' : '',
+                                    bankNameCheck: session.status === 'reconciled' ? 'RECONCILIADO' : '',
+                                    auditedBreakdown: (session.reconciledBreakdown || session.reconciled_breakdown || session.physicalBreakdown || session.physical_breakdown || {}) as any,
+                                    readOnly: true
+                                  })}
+                                  className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all border border-slate-700/50 hover:border-slate-600 shadow-sm"
+                                  title="Visualizar Detalhes"
+                                >
+                                  <Eye size={16} />
+                                </button>
+                                {session.status === 'closed' && (
+                                  <button onClick={() => setAuditModal({ show: true, session, bankNameCash: '', bankNameCheck: '', auditedBreakdown: (session.physicalBreakdown || session.physical_breakdown || {}) as any })} className="px-5 py-2 bg-brand-warning text-black rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-warning/20 hover:scale-105 transition-all whitespace-nowrap">Conferir Turno</button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredSessions.length === 0 && (
+                          <tr><td colSpan={5} className="py-20 text-center text-slate-600 italic uppercase font-bold text-[10px]">Nenhum turno localizado para auditoria</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
-            </div>
-          </main>
-        </div>
-      )}
+            </main>
+          </div>
+        )
+      }
       {/* MODAL CARTEIRA (Bancos) */}
       {
         activeModal === 'carteira' && (
@@ -1296,7 +1918,17 @@ const FinanceHub: React.FC = () => {
                   {banks.map(b => <option key={b.id} value={b.name}>{b.name.toUpperCase()}</option>)}
                 </select>
 
-                <button onClick={() => setShowWalletManualEntry(true)} className="w-full md:w-auto bg-brand-success text-white px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20 hover:scale-105 transition-all">Novo Lançamento</button>
+                <button
+                  onClick={() => setShowWalletManualEntry(true)}
+                  disabled={!activeFinanceSession}
+                  title={!activeFinanceSession ? "Abra o Caixa Financeiro para lançar" : ""}
+                  className={`w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all ${!activeFinanceSession
+                    ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                    : "bg-brand-success text-white shadow-brand-success/20 hover:scale-105"
+                    }`}
+                >
+                  Novo Lançamento
+                </button>
 
                 <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
                   <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
@@ -1875,18 +2507,40 @@ const FinanceHub: React.FC = () => {
         }}
         actionKey="LANCAMENTO_MANUAL_CARTEIRA"
         actionLabel={`Lançamento: ${manualEntryToAuthorize?.descricao} | JSON: ${JSON.stringify(manualEntryToAuthorize)}`}
-        details={`Tipo: ${manualEntryToAuthorize?.tipo} | Valor: ${manualEntryToAuthorize?.valor} | Desc: ${manualEntryToAuthorize?.descricao}`}
+        details={`Tipo: ${manualEntryToAuthorize?.tipo} | Valor: R$ ${manualEntryToAuthorize?.valor?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Desc: ${manualEntryToAuthorize?.descricao}`}
       />
 
-      {/* MODAL AUTH REVERSE */}
+      {/* MODAL AUTH REVERSE LIQUIDATION */}
       <RequestAuthorizationModal
-        isOpen={isRequestReverseAuthModalOpen}
-        onClose={() => setIsRequestReverseAuthModalOpen(false)}
-        actionKey="ESTORNAR_TRANSACAO_CARTEIRA"
-        actionLabel={`Solicitação para ESTORNAR Transação ID: ${txToAuthorize?.id || txToAuthorize?.uuid}`}
-        details={`Transação: ${txToAuthorize?.descricao} | Valor: R$ ${(txToAuthorize?.valor_entrada || 0) + (txToAuthorize?.valor_saida || 0)}`}
+        isOpen={isRequestReverseLiquidationAuthModalOpen}
+        onClose={() => setIsRequestReverseLiquidationAuthModalOpen(false)}
+        actionKey="ESTORNAR_LIQUIDACAO"
+        actionLabel={`Solicitação para ESTORNAR Liquidação ID: ${recordToReverse?.id}`}
+        details={`Lançamento: ${recordToReverse?.description} | Valor: R$ ${recordToReverse?.valor.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
       />
-    </div >
+
+      {/* MODAL AUTH EDIT COMMIT */}
+      <RequestAuthorizationModal
+        isOpen={isRequestEditLiquidationAuthModalOpen}
+        onClose={() => setIsRequestEditLiquidationAuthModalOpen(false)}
+        onSuccess={() => {
+          setShowNewTitleModal(false);
+          setPendingEditPayload(null);
+        }}
+        actionKey="SALVAR_EDICAO_FINANCEIRO"
+        actionLabel={`Alteração de Lançamento Manual ID: ${pendingEditPayload?.id} | JSON: ${JSON.stringify(pendingEditPayload)}`}
+        details={`Lançamento: ${pendingEditPayload?.description} | Novo Valor: R$ ${pendingEditPayload?.valor?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+      />
+
+      {/* MODAL AUTH DELETE LIQUIDATION */}
+      <RequestAuthorizationModal
+        isOpen={isRequestDeleteLiquidationAuthModalOpen}
+        onClose={() => setIsRequestDeleteLiquidationAuthModalOpen(false)}
+        actionKey="EXCLUIR_LIQUIDACAO"
+        actionLabel={`Solicitação para EXCLUIR Lançamento Manual ID: ${recordToDelete?.id}`}
+        details={`Lançamento: ${recordToDelete?.description} | Valor: R$ ${recordToDelete?.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+      />
+    </div>
   );
 };
 

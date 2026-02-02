@@ -79,6 +79,7 @@ const POS: React.FC = () => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
+  const [allSessions, setAllSessions] = useState<CashierSession[]>([]);
 
   const [allTerms, setAllTerms] = useState<PaymentTerm[]>([]);
   const [purchasePaymentTerms, setPurchasePaymentTerms] = useState<PaymentTerm[]>([]);
@@ -318,9 +319,30 @@ const POS: React.FC = () => {
     return { label: 'ABERTO', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', isStriked: false };
   };
 
+  // Polling for Auto-Refresh (10s)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      triggerRefresh();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   const historyRecords = useMemo(() => {
     if (!activeSession) return [];
-    const financials = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === activeSession.id);
+
+    const financials = db.queryTenant<FinancialRecord>('financials', companyId, f => {
+      // 1. Belong to this session (Standard)
+      if (f.caixa_id === activeSession.id) return true;
+
+      // 2. Belong to this User + Timeframe (Even if moved to Finance Session)
+      // Checks if created by this user AFTER the session opened
+      if ((f.user_id === activeSession.userId || f.user_id === (activeSession as any).user_id) &&
+        f.created_at >= activeSession.openingTime!) {
+        return true;
+      }
+      return false;
+    });
+
     return financials.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [activeSession, companyId, refreshKey]);
 
@@ -524,6 +546,7 @@ const POS: React.FC = () => {
       let allCats: FinanceCategory[] = [];
       let allMats: Material[] = [];
       let allParts: Partner[] = [];
+      let allSessionsData: CashierSession[] = [];
 
       if (client && companyId) {
         const fetchTable = async (table: string, filters: any = {}) => {
@@ -539,12 +562,13 @@ const POS: React.FC = () => {
           }
         };
 
-        const [bData, tData, cData, mData, pData] = await Promise.all([
+        const [bData, tData, cData, mData, pData, sData] = await Promise.all([
           fetchTable('banks', { eq: ['company_id', companyId] }),
           fetchTable('payment_terms', { or: `company_id.eq.${companyId},company_id.is.null` }),
           fetchTable('finance_categories', { or: `company_id.eq.${companyId},company_id.is.null` }),
           fetchTable('materials', { eq: ['company_id', companyId] }),
-          fetchTable('partners', { eq: ['company_id', companyId] })
+          fetchTable('partners', { eq: ['company_id', companyId] }),
+          fetchTable('cashier_sessions', { eq: ['company_id', companyId] })
         ]);
 
         allBanks = bData ? bData.map(db.normalize) : db.queryTenant<Bank>('banks', companyId);
@@ -552,12 +576,14 @@ const POS: React.FC = () => {
         allCats = cData ? cData.map(db.normalize) : db.queryTenant<FinanceCategory>('financeCategories', companyId);
         allMats = mData ? mData.map(db.normalize) : db.queryTenant<Material>('materials', companyId);
         allParts = pData ? pData.map(db.normalize) : db.queryTenant<Partner>('partners', companyId);
+        allSessionsData = sData ? (sData as any[]).map(db.normalize) : db.queryTenant<CashierSession>('cashierSessions', companyId);
       } else {
         allBanks = db.queryTenant<Bank>('banks', companyId);
         allTermsData = db.queryTenant<PaymentTerm>('paymentTerms', companyId, () => true);
         allCats = db.queryTenant<FinanceCategory>('financeCategories', companyId);
         allMats = db.queryTenant<Material>('materials', companyId);
         allParts = db.queryTenant<Partner>('partners', companyId);
+        allSessionsData = db.queryTenant<CashierSession>('cashierSessions', companyId);
       }
 
       const pTerms = allTermsData.filter(t => t.show_in_purchase === true || (t as any).showInPurchase === true);
@@ -572,6 +598,7 @@ const POS: React.FC = () => {
       setSalePaymentTerms(sTerms);
       setOpeningTerms(oTerms);
       setFinanceCategories(allCats);
+      setAllSessions(allSessionsData);
     } catch (err) {
       console.error("Error syncing data:", err);
     } finally {
@@ -965,6 +992,11 @@ const POS: React.FC = () => {
                         <td className="px-4 py-4 text-slate-300 font-bold uppercase truncate max-w-md">
                           {isPendingAction && <span className="text-brand-warning mr-2">[PEDIDO PENDENTE]</span>}
                           {isThisRecordBeingEdited && <span className="text-blue-400 mr-2">[EM EDIÇÃO]</span>}
+                          {rec.caixa_id !== activeSession?.id && rec.status === 'paid' && (
+                            <span className="text-purple-400 mr-2 bg-purple-500/10 border border-purple-500/20 px-1 rounded uppercase font-black text-[9px]">
+                              [BAIXADO EM: #{rec.caixa_id?.slice(0, 8).toUpperCase()}]
+                            </span>
+                          )}
                           {rec.description}
                         </td>
                         <td className="px-4 py-4">
@@ -1017,7 +1049,15 @@ const POS: React.FC = () => {
                                   <button onClick={() => { setPendingDeleteRecordId(rec.id); setIsRequestDeleteAuthModalOpen(true); }} className="p-2 bg-brand-error/10 text-brand-error rounded-lg" title="Cancelar Lançamento"><Trash2 size={16} /></button>
                                 )}
                                 {statusInfo.label !== 'PENDENTE' && (
-                                  <button onClick={() => { setPendingVoidRecordId(rec.id); setIsRequestAuthModalOpen(true); }} className="p-2 bg-brand-warning/10 text-brand-warning rounded-lg" title="Estornar para Pendente"><RotateCcw size={16} /></button>
+                                  (() => {
+                                    const recordSession = allSessions.find(s => s.id === rec.caixa_id);
+                                    const isFinanceLiquidation = recordSession?.type === 'finance';
+                                    if (isFinanceLiquidation) return null;
+
+                                    return (
+                                      <button onClick={() => { setPendingVoidRecordId(rec.id); setIsRequestAuthModalOpen(true); }} className="p-2 bg-brand-warning/10 text-brand-warning rounded-lg" title="Estornar para Pendente"><RotateCcw size={16} /></button>
+                                    );
+                                  })()
                                 )}
                               </>
                             )}

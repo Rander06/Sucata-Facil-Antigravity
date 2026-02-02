@@ -202,9 +202,9 @@ const prepareForCloud = (obj: any, tableKey: string) => {
   const numericFields = ['opening_balance', 'closing_balance', 'expected_balance', 'auditoria_corrigida', 'difference', 'valor', 'valor_entrada', 'valor_saida', 'saldo_real', 'stock', 'buy_price', 'sell_price', 'price', 'max_users'];
 
   allowedColumns.forEach(col => {
-    if (source[col] !== undefined && source[col] !== null) {
-      if (['id', 'payment_term_id', 'requested_by_id', 'responded_by_id', 'user_id', 'company_id', 'plan_id'].includes(col)) {
-        cloudObj[col] = (source[col] === '' || source[col] === 'null') ? null : String(source[col]);
+    if (source[col] !== undefined) {
+      if (['id', 'payment_term_id', 'requested_by_id', 'responded_by_id', 'user_id', 'company_id', 'plan_id', 'caixa_id', 'transaction_id', 'parceiro_id'].includes(col)) {
+        cloudObj[col] = (source[col] === '' || source[col] === 'null' || source[col] === null) ? null : String(source[col]);
       } else if (numericFields.includes(col)) {
         cloudObj[col] = parseNum(source[col]);
       } else {
