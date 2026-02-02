@@ -1,16 +1,18 @@
 ﻿import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { FinancialRecord, Partner, PaymentTerm, CashierSession, WalletTransaction, Bank, FinanceCategory, User } from '../types';
+import { FinancialRecord, Partner, PaymentTerm, CashierSession, WalletTransaction, Bank, FinanceCategory, User, PermissionModule, UserRole } from '../types';
 import {
   Wallet, Landmark, ArrowUpCircle, ArrowDownCircle, Search, Clock,
   ChevronRight, RefreshCw, ListChecks, CheckCircle2, ShieldCheck,
   TrendingUp, TrendingDown, AlertTriangle, AlertCircle, X, PlusCircle,
   FileText, Download, Printer, User as UserIcon, Receipt, Zap, Scale,
   CreditCard, Banknote, Landmark as BankIcon, Save, Loader2, Coins,
-  Calendar, Eye
+  Calendar, Eye, Trash2, Edit, RotateCcw
 } from 'lucide-react';
 import { TableLayout } from '../components/FinanceTableLayout';
+import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
+import { authorizationService } from '../services/authorizationService';
 
 const parseNumericString = (val: string) => {
   if (!val) return 0;
@@ -60,11 +62,20 @@ const getStatusInfo = (record: FinancialRecord) => {
 
 
 const FinanceHub: React.FC = () => {
-  const { currentUser, currentCompany } = useAppContext();
+  const { currentUser, currentCompany, pendingRequests, refreshRequests } = useAppContext();
   const companyId = currentUser?.companyId || currentUser?.company_id || null;
 
   const [refreshKey, setRefreshKey] = useState(0);
   const triggerRefresh = () => setRefreshKey(prev => prev + 1);
+
+  // Authorization State
+  const [isRequestEditAuthModalOpen, setIsRequestEditAuthModalOpen] = useState(false);
+  const [isRequestDeleteAuthModalOpen, setIsRequestDeleteAuthModalOpen] = useState(false);
+  const [txToAuthorize, setTxToAuthorize] = useState<WalletTransaction | null>(null);
+  const [manualEntryToAuthorize, setManualEntryToAuthorize] = useState<any>(null);
+  const [isRequestManualAuthModalOpen, setIsRequestManualAuthModalOpen] = useState(false);
+  const [isRequestReverseAuthModalOpen, setIsRequestReverseAuthModalOpen] = useState(false);
+  const processedAuthIds = useRef(new Set<string>());
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLiquidating, setIsLiquidating] = useState(false);
@@ -164,6 +175,8 @@ const FinanceHub: React.FC = () => {
   });
   const [auditDateEnd, setAuditDateEnd] = useState(db.getToday());
   const [auditOperatorFilter, setAuditOperatorFilter] = useState('all');
+  const [auditFilterSessionId, setAuditFilterSessionId] = useState('');
+  const [auditFilterStatus, setAuditFilterStatus] = useState('all');
 
   // Filtros da tabela de movimentações do turno
   const [auditTransactionFilters, setAuditTransactionFilters] = useState({
@@ -172,6 +185,11 @@ const FinanceHub: React.FC = () => {
     paymentTerm: '',
     nature: 'all'
   });
+
+  // Novos filtros para Liquidação
+  const [filterSession, setFilterSession] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterPartner, setFilterPartner] = useState('');
 
   const [liquidationModal, setLiquidationModal] = useState<{
     show: boolean;
@@ -184,9 +202,11 @@ const FinanceHub: React.FC = () => {
   const [auditModal, setAuditModal] = useState<{
     show: boolean;
     session: CashierSession | null;
-    bankName: string;
+    bankNameCash: string;
+    bankNameCheck: string;
     auditedBreakdown: Record<string, string>;
-  }>({ show: false, session: null, bankName: '', auditedBreakdown: {} });
+    readOnly?: boolean;
+  }>({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {} });
 
   const [walletForm, setWalletForm] = useState({
     tipo: 'ENTRADA' as 'ENTRADA' | 'SAIDA',
@@ -194,7 +214,8 @@ const FinanceHub: React.FC = () => {
     categoria: '',
     parceiro: '',
     payment_term_id: '',
-    descricao: ''
+    descricao: '',
+    id: '' // Para ediÃ§Ã£o
   });
 
   const parseNumericString = (str: string): number => {
@@ -288,6 +309,79 @@ const FinanceHub: React.FC = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Process Approved Authorization Requests
+  useEffect(() => {
+    if (!currentUser || !pendingRequests) return;
+
+    const approvedAndMine = pendingRequests.filter(r =>
+      r.status === 'APPROVED' &&
+      r.requested_by_id === currentUser.id &&
+      !processedAuthIds.current.has(r.id)
+    );
+
+    if (approvedAndMine.length > 0) {
+      approvedAndMine.forEach(async (req) => {
+        processedAuthIds.current.add(req.id);
+        try {
+          if (req.action_key === 'CANCELAR_TRANSACAO_CARTEIRA') {
+            const txId = req.action_label.split('ID: ')[1];
+            executeDeleteTransaction(txId);
+          } else if (req.action_key === 'LANCAMENTO_MANUAL_CARTEIRA') {
+            const jsonPart = req.action_label.split('JSON: ')[1];
+            if (jsonPart) {
+              const data = JSON.parse(jsonPart);
+              executeWalletManualSubmit(data);
+            }
+          } else if (req.action_key === 'ESTORNAR_TRANSACAO_CARTEIRA') {
+            const txId = req.action_label.split('ID: ')[1];
+            const tx = walletTransactions.find(t => t.id === txId || t.uuid === txId);
+            if (tx) executeReverseSystemTransaction(tx);
+          }
+          // Mark as PROCESSED to avoid re-triggering
+          await db.update('authorization_requests' as any, req.id, { status: 'PROCESSED' } as any);
+          refreshRequests();
+        } catch (e) { console.error("Error processing auth request", e); }
+      });
+    }
+  }, [pendingRequests, currentUser, walletTransactions]);
+
+  // Realtime Subscriptions for Auto-Refresh
+  useEffect(() => {
+    const client = db.getCloudClient();
+    if (!client || !companyId) return;
+
+    const channel = client.channel(`finance_hub_changes_${companyId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cashier_sessions', filter: `company_id=eq.${companyId}` },
+        () => {
+          console.log('Realtime: cashier_sessions updated, refreshing...');
+          triggerRefresh();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'financials', filter: `company_id=eq.${companyId}` },
+        () => {
+          console.log('Realtime: financials updated, refreshing...');
+          triggerRefresh();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'wallet_transactions', filter: `company_id=eq.${companyId}` },
+        () => {
+          console.log('Realtime: wallet_transactions updated, refreshing...');
+          triggerRefresh();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [companyId]);
+
 
 
   const filteredWallet = useMemo(() => {
@@ -315,9 +409,14 @@ const FinanceHub: React.FC = () => {
         (partner?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesType = filterType === 'ALL' || r.natureza === filterType;
-      return matchesSearch && matchesType;
+
+      const matchesSession = !filterSession || (r.caixa_id || '').toLowerCase().includes(filterSession.toLowerCase());
+      const matchesStatus = !filterStatus || status.label === filterStatus;
+      const matchesPartner = !filterPartner || (partner?.name || '').toLowerCase().includes(filterPartner.toLowerCase());
+
+      return matchesSearch && matchesType && matchesSession && matchesStatus && matchesPartner;
     });
-  }, [allFinancialRecords, filterType, dateStart, dateEnd, searchTerm, partners]);
+  }, [allFinancialRecords, filterType, dateStart, dateEnd, searchTerm, partners, filterSession, filterStatus, filterPartner]);
 
   const baixasMetrics = useMemo(() => {
     const metrics = { abertoIn: 0, abertoOut: 0, atrasadoIn: 0, atrasadoOut: 0 };
@@ -339,9 +438,12 @@ const FinanceHub: React.FC = () => {
       const sDate = (s.openingTime || s.opening_time || '').substring(0, 10);
       const matchDate = sDate >= auditDateStart && sDate <= auditDateEnd;
       const matchOperator = auditOperatorFilter === 'all' || s.userId === auditOperatorFilter || s.user_id === auditOperatorFilter;
-      return matchDate && matchOperator;
+      const matchSessionId = !auditFilterSessionId || (s.id || '').toLowerCase().includes(auditFilterSessionId.toLowerCase());
+      const matchStatus = auditFilterStatus === 'all' || s.status === auditFilterStatus;
+
+      return matchDate && matchOperator && matchSessionId && matchStatus;
     });
-  }, [cashierSessions, auditDateStart, auditDateEnd, auditOperatorFilter]);
+  }, [cashierSessions, auditDateStart, auditDateEnd, auditOperatorFilter, auditFilterSessionId, auditFilterStatus]);
 
   /**
    * @google/genai Senior Frontend Engineer: 
@@ -445,35 +547,89 @@ const FinanceHub: React.FC = () => {
     return items;
   }, [auditModal.session, companyId, allPaymentTerms]);
 
+  const executeWalletManualSubmit = async (data: any) => {
+    try {
+      const amount = parseNumericString(data.valor);
+      const lastBalance = walletTransactions[0]?.saldo_real || 0;
+      const isEntry = data.tipo === 'ENTRADA';
+
+      // Re-find term just in case, or use ID directly
+      // Assuming data.payment_term_id is the correct ID/UUID
+
+      await db.insert<WalletTransaction>('walletTransactions' as any, {
+        company_id: companyId!,
+        user_id: currentUser?.id,
+        categoria: data.categoria,
+        parceiro: data.parceiro,
+        payment_term_id: data.payment_term_id,
+        descricao: data.descricao.toUpperCase() || `LANÇAMENTO MANUAL ${data.tipo}`,
+        valor_entrada: isEntry ? amount : 0,
+        valor_saida: isEntry ? 0 : amount,
+        saldo_real: isEntry ? lastBalance + amount : lastBalance - amount,
+        created_at: db.getNowISO()
+      });
+
+      if (data.id) {
+        await db.delete('walletTransactions', data.id);
+      }
+
+      setShowWalletManualEntry(false);
+      setWalletForm({ tipo: 'ENTRADA', valor: '', categoria: '', parceiro: '', payment_term_id: '', descricao: '', id: '' });
+      triggerRefresh();
+    } catch (err: any) {
+      alert("Erro ao efetivar lançamento: " + err.message);
+    }
+  };
+
   const handleWalletManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseNumericString(walletForm.valor);
     if (isNaN(amount) || amount <= 0) return alert("Informe um valor válido.");
     if (!walletForm.payment_term_id) return alert("Selecione um Meio de Pagamento.");
 
-    try {
-      const lastBalance = walletTransactions[0]?.saldo_real || 0;
-      const isEntry = walletForm.tipo === 'ENTRADA';
-      const term = bankManualTerms.find(t => t.id === walletForm.payment_term_id || t.uuid === walletForm.payment_term_id);
+    if (walletForm.tipo === 'SAIDA') {
+      const selectedBankId = walletForm.parceiro;
+      const currentBankBalance = walletTransactions
+        .filter(t => t.parceiro === selectedBankId && t.status !== 'cancelled')
+        .reduce((acc, t) => acc + (t.valor_entrada || 0) - (t.valor_saida || 0), 0);
 
-      await db.insert<WalletTransaction>('walletTransactions' as any, {
-        company_id: companyId!,
-        user_id: currentUser?.id,
-        categoria: walletForm.categoria,
-        parceiro: walletForm.parceiro,
-        payment_term_id: term?.id || walletForm.payment_term_id,
-        descricao: walletForm.descricao.toUpperCase() || `LANÇAMENTO MANUAL ${walletForm.tipo}`,
-        valor_entrada: isEntry ? amount : 0,
-        valor_saida: isEntry ? 0 : amount,
-        saldo_real: isEntry ? lastBalance + amount : lastBalance - amount,
-        created_at: db.getNowISO()
-      });
-      setShowWalletManualEntry(false);
-      setWalletForm({ tipo: 'ENTRADA', valor: '', categoria: '', parceiro: '', payment_term_id: '', descricao: '' });
+      if (amount > currentBankBalance + 0.01) {
+        return alert(`Saldo insuficiente na conta selecionada.\nSaldo Atual: R$ ${currentBankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`);
+      }
+    }
+
+    setManualEntryToAuthorize(walletForm);
+    setIsRequestManualAuthModalOpen(true);
+  };
+
+  const executeDeleteTransaction = async (id: string) => {
+    try {
+      await db.update('walletTransactions', id, { status: 'cancelled' });
       triggerRefresh();
     } catch (err: any) {
-      alert("Erro ao salvar: " + err.message);
+      alert("Erro ao cancelar: " + err.message);
     }
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    const t = walletTransactions.find(wt => (wt.id === id || wt.uuid === id));
+    if (!t) return;
+    setTxToAuthorize(t);
+    setIsRequestDeleteAuthModalOpen(true);
+  };
+
+  const handleEditTransaction = (t: WalletTransaction) => {
+    const isEntry = t.valor_entrada > 0;
+    setWalletForm({
+      id: t.id,
+      tipo: isEntry ? 'ENTRADA' : 'SAIDA',
+      valor: (isEntry ? t.valor_entrada : t.valor_saida).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+      categoria: t.categoria || '',
+      parceiro: t.parceiro || '',
+      payment_term_id: t.payment_term_id || '',
+      descricao: t.descricao || ''
+    });
+    setShowWalletManualEntry(true);
   };
 
   const handleProcessLiquidation = async (e: React.FormEvent) => {
@@ -504,13 +660,18 @@ const FinanceHub: React.FC = () => {
    */
   const handleProcessReconciliation = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { session, bankName, auditedBreakdown } = auditModal;
-    if (!session || !bankName) return alert("Selecione a conta de destino para os valores.");
+    const { session, bankNameCash, bankNameCheck, auditedBreakdown } = auditModal;
+
+    if (!session) return;
+
+    const valVista = parseNumericString(auditedBreakdown['physical_cash'] || '0');
+    const valCheque = parseNumericString(auditedBreakdown['physical_check'] || '0');
+
+    if (valVista > 0 && !bankNameCash) return alert("Selecione a conta de destino para o DINHEIRO.");
+    if (valCheque > 0 && !bankNameCheck) return alert("Selecione a conta de destino para o CHEQUE.");
 
     setIsAuditing(true);
     try {
-      const valVista = parseNumericString(auditedBreakdown['physical_cash'] || '0');
-      const valCheque = parseNumericString(auditedBreakdown['physical_check'] || '0');
       const auditedTotal = valVista + valCheque;
 
       let runningBalance = walletTransactions[0]?.saldo_real || 0;
@@ -520,11 +681,11 @@ const FinanceHub: React.FC = () => {
       const termDinheiro = allHubTerms.find(t => t.name.toUpperCase().includes('DINHEIRO'));
       const termCheque = allHubTerms.find(t => t.name.toUpperCase().includes('CHEQUE'));
 
-      // Fallback para NULL se nÃ£o encontrar o termo (evita erro de FK com UUIDs falsos)
+      // Fallback para NULL se não encontrar o termo (evita erro de FK com UUIDs falsos)
       const idDinheiro = termDinheiro?.id || termDinheiro?.uuid || null;
       const idCheque = termCheque?.id || termCheque?.uuid || null;
 
-      // 1. Atualizar o status da sessÃ£o para conferido
+      // 1. Atualizar o status da sessão para conferido
       await db.update('cashierSessions', session.id, {
         status: 'reconciled',
         reconciledAt: now,
@@ -536,17 +697,17 @@ const FinanceHub: React.FC = () => {
         reconciledBreakdown: auditedBreakdown
       });
 
-      // 2. LanÃ§amento individual para DINHEIRO (se houver valor informado)
+      // 2. Lançamento individual para DINHEIRO (se houver valor informado)
       if (valVista > 0) {
         await db.insert<WalletTransaction>('walletTransactions' as any, {
           company_id: companyId!,
           user_id: currentUser?.id,
           operador_id: session.user_id || session.userId,
           operador_name: session.user_name || session.userName,
-          categoria: 'CONFERÃŠNCIA DE CAIXA',
-          parceiro: bankName,
+          categoria: 'CONFERÊNCIA DE CAIXA',
+          parceiro: bankNameCash,
           payment_term_id: idDinheiro,
-          descricao: `DEPÃ“SITO MASTER [DINHEIRO] - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
+          descricao: `DEPÓSITO MASTER [DINHEIRO] - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
           valor_entrada: valVista,
           valor_saida: 0,
           saldo_real: runningBalance + valVista,
@@ -555,17 +716,17 @@ const FinanceHub: React.FC = () => {
         runningBalance += valVista;
       }
 
-      // 3. LanÃ§amento individual para CHEQUE (se houver valor informado)
+      // 3. Lançamento individual para CHEQUE (se houver valor informado)
       if (valCheque > 0) {
         await db.insert<WalletTransaction>('walletTransactions' as any, {
           company_id: companyId!,
           user_id: currentUser?.id,
           operador_id: session.user_id || session.userId,
           operador_name: session.user_name || session.userName,
-          categoria: 'CONFERÃŠNCIA DE CAIXA',
-          parceiro: bankName,
+          categoria: 'CONFERÊNCIA DE CAIXA',
+          parceiro: bankNameCheck,
           payment_term_id: idCheque,
-          descricao: `DEPÃ“SITO MASTER [CHEQUE] - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
+          descricao: `DEPÓSITO MASTER [CHEQUE] - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
           valor_entrada: valCheque,
           valor_saida: 0,
           saldo_real: runningBalance + valCheque,
@@ -573,17 +734,17 @@ const FinanceHub: React.FC = () => {
         });
       }
 
-      // 4. Fallback: Log de auditoria para turno sem saldo fÃ­sico
+      // 4. Fallback: Log de auditoria para turno sem saldo físico
       if (valVista === 0 && valCheque === 0) {
         await db.insert<WalletTransaction>('walletTransactions' as any, {
           company_id: companyId!,
           user_id: currentUser?.id,
           operador_id: session.user_id || session.userId,
           operador_name: session.user_name || session.userName,
-          categoria: 'CONFERÃŠNCIA DE CAIXA',
-          parceiro: bankName,
+          categoria: 'CONFERÊNCIA DE CAIXA',
+          parceiro: bankNameCash,
           payment_term_id: idDinheiro,
-          descricao: `RECONCILIÃ‡ÃƒO (SEM SALDO FÃSICO) - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
+          descricao: `RECONCILIAÇÃO (SEM SALDO FÍSICO) - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
           valor_entrada: 0,
           valor_saida: 0,
           saldo_real: runningBalance,
@@ -597,10 +758,10 @@ const FinanceHub: React.FC = () => {
         currentUser?.id || '',
         currentUser?.name || 'Sistema',
         'AUDIT_MASTER_RECONCILIATION',
-        `OP: Auditoria do Turno Concluída | CTX: Hub Financeiro | DET: Reconciliação do turno #${session.id.slice(0, 6).toUpperCase()} do operador ${session.user_name || session.userName}. Dinheiro: R$ ${valVista.toFixed(2)}, Cheque: R$ ${valCheque.toFixed(2)}, Total Auditado: R$ ${auditedTotal.toFixed(2)}. Depositado em: ${bankName} | VAL: R$ ${auditedTotal.toFixed(2)}`
+        `OP: Auditoria do Turno Concluída | CTX: Hub Financeiro | DET: Reconciliação do turno #${session.id.slice(0, 6).toUpperCase()} do operador ${session.user_name || session.userName}. Dinheiro: R$ ${valVista.toFixed(2)} -> ${bankNameCash}, Cheque: R$ ${valCheque.toFixed(2)} -> ${bankNameCheck}, Total Auditado: R$ ${auditedTotal.toFixed(2)}.`
       );
 
-      setAuditModal({ show: false, session: null, bankName: '', auditedBreakdown: {} });
+      setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {} });
       triggerRefresh();
       alert("Auditoria finalizada. Valores depositados separadamente por meio de pagamento.");
     } catch (err: any) {
@@ -610,10 +771,157 @@ const FinanceHub: React.FC = () => {
     }
   };
 
+  const handleReverseReconciliation = async () => {
+    const { session } = auditModal;
+    if (!session) return;
+
+    if (!confirm(`Tem certeza que deseja ESTORNAR a conferência do turno #${session.id.slice(0, 6).toUpperCase()}? \n\nIsso irá:\n1. Reabrir o turno para conferência.\n2. Excluir os depósitos gerados no Extrato Bancário.`)) return;
+
+    setIsAuditing(true);
+    try {
+      // 1. Reverter Status da Sessão
+      await db.update('cashierSessions', session.id, {
+        status: 'closed', // Voltar para fechado (aguardando conferência)
+        reconciledAt: null,
+        reconciledById: null,
+        reconciled_by_id: null,
+        reconciledByName: null,
+        reconciled_by_name: null,
+        reconciledBalance: null,
+        reconciledBreakdown: null
+      });
+
+      // 2. Excluir lançamentos financeiros gerados (Soft Delete ou Delete Real)
+      // Buscamos pela descrição padrão gerada contendo o ID do turno
+      const termoBusca = `TURNO #${session.id.slice(0, 6).toUpperCase()}`;
+
+      const transactionsToDelete = walletTransactions.filter(t =>
+        t.categoria === 'CONFERÊNCIA DE CAIXA' &&
+        t.descricao.includes(termoBusca)
+      );
+
+      for (const t of transactionsToDelete) {
+        await db.update('walletTransactions', t.id || t.uuid, { status: 'cancelled' });
+      }
+
+      alert("Conferência estornada com sucesso! O turno está disponível para nova conferência.");
+      setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {} });
+      triggerRefresh();
+    } catch (err: any) {
+      alert("Erro ao estornar: " + err.message);
+    } finally {
+      setIsAuditing(false);
+    }
+  };
+
+  const executeReverseSystemTransaction = async (t: WalletTransaction) => {
+    const isSystem = t.categoria === 'CONFERÊNCIA DE CAIXA' || t.categoria === 'CONFERÃŠNCIA DE CAIXA' || t.descricao.includes('TURNO #');
+
+    if (isSystem) {
+      const match = t.descricao.match(/TURNO #([A-Z0-9]+)/);
+      if (match && match[1]) {
+        const shortId = match[1];
+        // Buscar session pelo match parcial do ID (shortId)
+        const sessions = await db.query<CashierSession>('cashierSessions');
+        const session = sessions.find(s => s.id.toUpperCase().startsWith(shortId));
+
+        if (session) {
+          try {
+            await db.update('cashierSessions', session.id, {
+              status: 'closed',
+              reconciledAt: null,
+              reconciledBalance: null,
+              reconciledBreakdown: null
+            });
+            const termoBusca = `TURNO #${shortId}`;
+            const transactions = walletTransactions.filter(wt => wt.descricao.includes(termoBusca));
+            for (const trans of transactions) {
+              await db.update('walletTransactions', trans.id || trans.uuid, { status: 'cancelled' });
+            }
+            alert("Estorno realizado com sucesso! O turno foi reaberto para conferência.");
+            triggerRefresh();
+          } catch (err: any) {
+            alert("Erro ao estornar: " + err.message);
+          }
+        } else {
+          alert("Não foi possível localizar o turno de origem automaticamente.");
+        }
+      }
+    } else {
+      alert("Estorno automático não disponível para este tipo de lançamento.");
+    }
+  };
+
+  const handleReverseSystemTransaction = (t: WalletTransaction) => {
+    setTxToAuthorize(t);
+    setIsRequestReverseAuthModalOpen(true);
+  };
+
   const stats = useMemo(() => {
-    const currentBalance = walletTransactions[0]?.saldo_real || 0;
+    // Calcular saldo dinâmico somando Entradas - Saídas (ignorando cancelados)
+    const currentBalance = walletTransactions
+      .filter(t => t.status !== 'cancelled')
+      .reduce((acc, t) => acc + (t.valor_entrada || 0) - (t.valor_saida || 0), 0);
     return { currentWalletBalance: currentBalance };
   }, [walletTransactions]);
+
+  const dynamicWalletData = useMemo(() => {
+    // 1. Sort Ascending (Oldest First) to calculate running balance
+    let sorted = [...walletTransactions].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    // 2. Filter by Bank First (Scope for Balance)
+    if (walletFilterBanco) {
+      sorted = sorted.filter(t => t.parceiro === walletFilterBanco);
+    }
+
+    // 3. Calculate Running Balance
+    let runningBalance = 0;
+    const computed = sorted.map(t => {
+      if (t.status !== 'cancelled') {
+        runningBalance += (t.valor_entrada || 0) - (t.valor_saida || 0);
+      }
+      return { ...t, computedBalance: runningBalance };
+    });
+
+    // 4. Apply View Filters (Search, etc.)
+    let filtered = computed;
+    if (searchTerm) {
+      const lower = searchTerm.toLowerCase();
+      filtered = filtered.filter(t =>
+        (t.descricao || '').toLowerCase().includes(lower) ||
+        (t.parceiro || '').toLowerCase().includes(lower) ||
+        (t.operador_name || '').toLowerCase().includes(lower) ||
+        (t.forma || '').toLowerCase().includes(lower)
+      );
+    }
+
+    // 5. Reverse for Display (Newest First)
+    return filtered.reverse();
+  }, [walletTransactions, walletFilterBanco, searchTerm]);
+
+  const walletMetrics = useMemo(() => {
+    // Filter dynamicWalletData (already sorted/computed/reversed) by DATE
+    const inPeriod = dynamicWalletData.filter(t => {
+      const tDate = (t.created_at || '').substring(0, 10);
+      return tDate >= dateStart && tDate <= dateEnd;
+    });
+
+    let totalEntrada = 0;
+    let totalSaida = 0;
+
+    inPeriod.forEach(t => {
+      if (t.status !== 'cancelled') {
+        totalEntrada += (t.valor_entrada || 0);
+        totalSaida += (t.valor_saida || 0);
+      }
+    });
+
+    // Saldo Final: Take from the NEWEST transaction in the period (index 0 because dynamicWalletData is reversed)
+    // OR if no transactions, it's tricky. Let's show the balance of the LAST transaction if exists.
+    const finalBalance = inPeriod.length > 0 ? inPeriod[0].computedBalance : 0; // Fallback to 0 or handle logic better later if needed.
+
+    return { totalEntrada, totalSaida, result: totalEntrada - totalSaida, finalBalance: inPeriod.length > 0 ? finalBalance : null };
+  }, [dynamicWalletData, dateStart, dateEnd]);
 
   const menuItems = [
     {
@@ -621,21 +929,24 @@ const FinanceHub: React.FC = () => {
       label: 'Liquidação de Títulos',
       description: 'Gestão de contas a pagar e receber',
       icon: ListChecks,
-      color: 'green'
+      color: 'green',
+      permission: PermissionModule.FINANCE_LIQUIDATE
     },
     {
       id: 'conferencia',
       label: 'Auditoria de Turnos',
       description: 'Conferência física e depósito master',
       icon: ShieldCheck,
-      color: 'yellow'
+      color: 'yellow',
+      permission: PermissionModule.FINANCE_AUDIT
     },
     {
       id: 'carteira',
       label: 'Extrato Bancário',
       description: 'Fluxo de caixa e saldos reais cloud',
       icon: Landmark,
-      color: 'blue'
+      color: 'blue',
+      permission: PermissionModule.FINANCE_EXTRACT
     }
   ];
 
@@ -674,25 +985,32 @@ const FinanceHub: React.FC = () => {
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
-        {menuItems.map(item => (
-          <button
-            key={item.id}
-            onClick={() => setActiveModal(item.id as any)}
-            className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)}`}
-          >
-            <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
-              item.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
-                'text-brand-warning group-hover:bg-brand-warning/10'
-              }`}>
-              <item.icon size={28} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3>
-              <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{item.description}</p>
-            </div>
-            <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
-          </button>
-        ))}
+        {menuItems
+          .filter(item =>
+            currentUser?.permissions.includes(item.permission!) ||
+            currentUser?.role === UserRole.SUPER_ADMIN ||
+            currentUser?.role === UserRole.COMPANY_ADMIN ||
+            currentUser?.email === 'admin@sucatafacil.com'
+          )
+          .map(item => (
+            <button
+              key={item.id}
+              onClick={() => setActiveModal(item.id as any)}
+              className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)}`}
+            >
+              <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
+                item.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
+                  'text-brand-warning group-hover:bg-brand-warning/10'
+                }`}>
+                <item.icon size={28} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3>
+                <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{item.description}</p>
+              </div>
+              <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
+            </button>
+          ))}
       </div>
 
       {/* MODAL BAIXAS */}
@@ -713,9 +1031,9 @@ const FinanceHub: React.FC = () => {
 
             <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
               <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
                 <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
+                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
               </div>
 
               <div className="relative w-full md:w-64">
@@ -723,10 +1041,42 @@ const FinanceHub: React.FC = () => {
                 <input type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
               </div>
 
-              <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
-                <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
-                <X size={18} />
-              </button>
+              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                <input
+                  type="text"
+                  placeholder="Turno ID..."
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-24"
+                  value={filterSession}
+                  onChange={e => setFilterSession(e.target.value)}
+                />
+
+                <select
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
+                  value={filterStatus}
+                  onChange={e => setFilterStatus(e.target.value)}
+                >
+                  <option value="">TODOS STATUS</option>
+                  <option value="ABERTO">ABERTO</option>
+                  <option value="ATRASADO">ATRASADO</option>
+                </select>
+
+                <input
+                  type="text"
+                  list="partner-list-options"
+                  placeholder="Filtrar Parceiro..."
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-32"
+                  value={filterPartner}
+                  onChange={e => setFilterPartner(e.target.value)}
+                />
+                <datalist id="partner-list-options">
+                  {partners.map(p => <option key={p.id} value={p.name.toUpperCase()} />)}
+                </datalist>
+
+                <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
+                  <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
+                  <X size={18} />
+                </button>
+              </div>
             </div>
           </header>
           <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
@@ -801,11 +1151,41 @@ const FinanceHub: React.FC = () => {
               </div>
               <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
             </div>
-            <div className="flex items-center gap-3">
-              <select className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-[10px] text-white font-black uppercase outline-none focus:border-brand-warning" value={auditOperatorFilter} onChange={e => setAuditOperatorFilter(e.target.value)}>
+            <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+              <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
+                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
+                <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
+                <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
+              </div>
+
+              <input
+                type="text"
+                placeholder="Turno ID..."
+                className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-24"
+                value={auditFilterSessionId}
+                onChange={e => setAuditFilterSessionId(e.target.value)}
+              />
+
+              <select
+                className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
+                value={auditFilterStatus}
+                onChange={e => setAuditFilterStatus(e.target.value)}
+              >
+                <option value="all">TODOS STATUS</option>
+                <option value="open">ABERTO</option>
+                <option value="closed">FECHADO</option>
+                <option value="reconciled">CONFERIDO</option>
+              </select>
+
+              <select
+                className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
+                value={auditOperatorFilter}
+                onChange={e => setAuditOperatorFilter(e.target.value)}
+              >
                 <option value="all">TODOS OPERADORES</option>
                 {teamUsers.map(u => <option key={u.id} value={u.id}>{u.name.toUpperCase()}</option>)}
               </select>
+
               <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
                 <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
                 <X size={18} />
@@ -819,6 +1199,7 @@ const FinanceHub: React.FC = () => {
                   <table className="w-full text-left min-w-[900px]">
                     <thead>
                       <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest bg-slate-900/60 border-b border-slate-800">
+                        <th className="px-6 py-5">Turno (PDV)</th>
                         <th className="px-6 py-5">Início do Turno</th>
                         <th className="px-6 py-5">Operador</th>
                         <th className="px-6 py-5">Auditor</th>
@@ -830,6 +1211,7 @@ const FinanceHub: React.FC = () => {
                     <tbody className="divide-y divide-slate-800/40">
                       {filteredSessions.map(session => (
                         <tr key={session.id} className="hover:bg-slate-800/20 transition-all text-xs">
+                          <td className="px-6 py-4 font-mono text-slate-500 font-bold">#{session.id.slice(0, 8).toUpperCase()}</td>
                           <td className="px-6 py-4 font-mono text-slate-400 font-bold">{new Date(session.openingTime || session.opening_time || '').toLocaleString()}</td>
                           <td className="px-6 py-4 font-black uppercase text-slate-200">{session.userName || session.user_name}</td>
                           <td className="px-6 py-4 font-black uppercase text-brand-success/80 text-[10px]">{session.reconciledByName || session.reconciled_by_name || '-'}</td>
@@ -848,8 +1230,10 @@ const FinanceHub: React.FC = () => {
                                 onClick={() => setAuditModal({
                                   show: true,
                                   session,
-                                  bankName: session.status === 'reconciled' ? 'RECONCILIADO' : '',
-                                  auditedBreakdown: (session.reconciledBreakdown || session.reconciled_breakdown || session.physicalBreakdown || session.physical_breakdown || {}) as any
+                                  bankNameCash: session.status === 'reconciled' ? 'RECONCILIADO' : '',
+                                  bankNameCheck: session.status === 'reconciled' ? 'RECONCILIADO' : '',
+                                  auditedBreakdown: (session.reconciledBreakdown || session.reconciled_breakdown || session.physicalBreakdown || session.physical_breakdown || {}) as any,
+                                  readOnly: true
                                 })}
                                 className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all border border-slate-700/50 hover:border-slate-600 shadow-sm"
                                 title="Visualizar Detalhes"
@@ -857,7 +1241,7 @@ const FinanceHub: React.FC = () => {
                                 <Eye size={16} />
                               </button>
                               {session.status === 'closed' && (
-                                <button onClick={() => setAuditModal({ show: true, session, bankName: '', auditedBreakdown: (session.physicalBreakdown || session.physical_breakdown || {}) as any })} className="px-5 py-2 bg-brand-warning text-black rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-warning/20 hover:scale-105 transition-all whitespace-nowrap">Conferir Turno</button>
+                                <button onClick={() => setAuditModal({ show: true, session, bankNameCash: '', bankNameCheck: '', auditedBreakdown: (session.physicalBreakdown || session.physical_breakdown || {}) as any })} className="px-5 py-2 bg-brand-warning text-black rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-warning/20 hover:scale-105 transition-all whitespace-nowrap">Conferir Turno</button>
                               )}
                             </div>
                           </td>
@@ -893,15 +1277,24 @@ const FinanceHub: React.FC = () => {
 
               <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
                 <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                  <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                  <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
                   <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                  <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
+                  <input type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
                 </div>
 
                 <div className="relative w-full md:w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
                   <input type="text" placeholder="Filtrar..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                 </div>
+
+                <select
+                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 max-w-[150px]"
+                  value={walletFilterBanco}
+                  onChange={e => setWalletFilterBanco(e.target.value)}
+                >
+                  <option value="">TODOS BANCOS</option>
+                  {banks.map(b => <option key={b.id} value={b.name}>{b.name.toUpperCase()}</option>)}
+                </select>
 
                 <button onClick={() => setShowWalletManualEntry(true)} className="w-full md:w-auto bg-brand-success text-white px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20 hover:scale-105 transition-all">Novo Lançamento</button>
 
@@ -913,6 +1306,30 @@ const FinanceHub: React.FC = () => {
             </header>
             <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
               <div className="max-w-7xl mx-auto space-y-6">
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 no-print">
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Entradas (Período)</p>
+                    <h3 className="text-xl font-black text-white">R$ {walletMetrics.totalEntrada.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-brand-success"><ArrowUpCircle size={12} /><span className="text-[8px] font-bold uppercase">Créditos Confirmados</span></div>
+                  </div>
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Saídas (Período)</p>
+                    <h3 className="text-xl font-black text-white">R$ {walletMetrics.totalSaida.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-brand-error"><ArrowDownCircle size={12} /><span className="text-[8px] font-bold uppercase">Débitos Realizados</span></div>
+                  </div>
+                  <div className={`enterprise-card p-5 border-l-4 shadow-lg ${walletMetrics.result >= 0 ? 'border-l-blue-500 bg-blue-500/5' : 'border-l-brand-warning bg-brand-warning/5'}`}>
+                    <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${walletMetrics.result >= 0 ? 'text-blue-400' : 'text-brand-warning'}`}>Resultado do Período</p>
+                    <h3 className="text-xl font-black text-white">R$ {walletMetrics.result.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <div className={`flex items-center gap-1.5 mt-2 ${walletMetrics.result >= 0 ? 'text-blue-400' : 'text-brand-warning'}`}><Scale size={12} /><span className="text-[8px] font-bold uppercase">Balanço do Filtro</span></div>
+                  </div>
+                  <div className="enterprise-card p-5 border-l-4 border-l-slate-600 bg-slate-800/30 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Saldo Final (no Filtro)</p>
+                    <h3 className="text-xl font-black text-white">{walletMetrics.finalBalance !== null ? `R$ ${walletMetrics.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '---'}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-slate-400"><Wallet size={12} /><span className="text-[8px] font-bold uppercase">Posição Atual</span></div>
+                  </div>
+                </div>
+
                 <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800 bg-slate-900/10">
                   <div className="overflow-x-auto scrollbar-thick">
                     <table className="w-full text-left min-w-[1100px]">
@@ -925,38 +1342,50 @@ const FinanceHub: React.FC = () => {
                           <th className="px-6 py-5 text-right">E (+)</th>
                           <th className="px-6 py-5 text-right">S (-)</th>
                           <th className="px-6 py-5 text-right">Saldo Real</th>
+                          <th className="px-6 py-5 text-center">Ações</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40">
-                        {filteredWallet.map(t => {
+                        {dynamicWalletData.map((t: any) => {
                           const term = allHubTerms.find(term => term.id === t.payment_term_id || term.uuid === t.payment_term_id);
                           const bank = banks.find(b => b.id === t.parceiro);
                           const operator = teamUsers.find(u => u.id === t.user_id || (u as any).user_id === t.user_id);
+                          const isCancelled = t.status === 'cancelled';
+                          const isSystem = t.categoria === 'CONFERÊNCIA DE CAIXA' || t.categoria === 'CONFERÃŠNCIA DE CAIXA' || t.descricao.includes('TURNO #') || t.categoria === 'ABERTURA DE CAIXA' || t.descricao.includes('FUNDO DE TROCO');
+                          const isOpening = t.categoria === 'ABERTURA DE CAIXA' || t.descricao.includes('FUNDO DE TROCO');
+
                           return (
-                            <tr key={t.id} className="text-xs hover:bg-slate-800/30 transition-all group">
-                              <td className="px-6 py-4 text-slate-500 font-mono font-bold">{new Date(t.created_at).toLocaleDateString()} <span className="opacity-40">{new Date(t.created_at).toLocaleTimeString()}</span></td>
-                              <td className="px-6 py-4 font-black uppercase text-slate-200">{bank ? bank.name : t.parceiro}</td>
+                            <tr key={t.id} className={`text-xs transition-all group ${isCancelled ? 'opacity-50 grayscale' : 'hover:bg-slate-800/30'}`}>
+                              <td className={`px-6 py-4 text-slate-500 font-mono font-bold ${isCancelled ? 'line-through' : ''}`}>{new Date(t.created_at).toLocaleDateString()} <span className="opacity-40">{new Date(t.created_at).toLocaleTimeString()}</span></td>
+                              <td className={`px-6 py-4 font-black uppercase text-slate-200 ${isCancelled ? 'line-through' : ''}`}>{bank ? bank.name : t.parceiro}</td>
                               <td className="px-6 py-4">
-                                <p className="text-slate-300 uppercase font-medium whitespace-normal break-words">{t.descricao}</p>
-                                <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">{term?.name || t.forma || 'Lançamento Direto'}</p>
+                                <p className={`text-slate-300 uppercase font-medium whitespace-normal break-words ${isCancelled ? 'line-through' : ''}`}>{t.descricao} {isCancelled && <span className="text-red-500 font-bold ml-2">(CANCELADO)</span>}</p>
+                                <p className={`text-[9px] text-slate-500 uppercase font-bold tracking-tighter ${isCancelled ? 'line-through' : ''}`}>{term?.name || t.forma || 'Lançamento Direto'}</p>
                               </td>
-                              <td className="px-6 py-4 uppercase text-[10px] font-black text-brand-success/80">
-                                <div className="flex flex-col">
-                                  <span>{operator?.name || t.user_name || 'Sistema'}</span>
-                                  {t.operador_name && (
-                                    <span className="text-[8px] text-slate-500 font-bold border-t border-slate-800/50 mt-1 pt-1 italic">
-                                      OP.CX: {t.operador_name}
-                                    </span>
-                                  )}
-                                </div>
+                              <td className={`px-6 py-4 uppercase text-[10px] font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-success/80'}`}>
+                                {operator ? operator.name : (t.operador_name || 'Sistema')}
                               </td>
-                              <td className="px-6 py-4 text-right font-black text-brand-success">{t.valor_entrada > 0 ? `R$ ${t.valor_entrada.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
-                              <td className="px-6 py-4 text-right font-black text-brand-error">{t.valor_saida > 0 ? `R$ ${t.valor_saida.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
-                              <td className="px-6 py-4 text-right font-black text-white bg-slate-800/20">R$ {t.saldo_real.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                              <td className={`px-6 py-4 text-right font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-success'}`}>{t.valor_entrada > 0 ? `R$ ${t.valor_entrada.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
+                              <td className={`px-6 py-4 text-right font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-error'}`}>{t.valor_saida > 0 ? `R$ ${t.valor_saida.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
+                              <td className="px-6 py-4 text-right font-black text-white bg-slate-800/20">{isCancelled ? '---' : `R$ ${t.computedBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</td>
+                              <td className="px-6 py-4 text-center">
+                                {!isCancelled && (
+                                  <div className="flex items-center justify-center gap-2">
+                                    {isSystem ? (
+                                      !isOpening && <button onClick={() => handleReverseSystemTransaction(t)} className="p-2 text-yellow-500 hover:bg-yellow-500/10 rounded-lg transition-all" title="Estornar Conferência"><RotateCcw size={14} /></button>
+                                    ) : (
+                                      <>
+                                        <button onClick={() => handleEditTransaction(t)} className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all" title="Editar"><Edit size={14} /></button>
+                                        <button onClick={() => handleDeleteTransaction(t.id || t.uuid)} className="p-2 text-brand-error hover:bg-brand-error/10 rounded-lg transition-all" title="Cancelar Lançamento"><Trash2 size={14} /></button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
                             </tr>
                           )
                         })}
-                        {filteredWallet.length === 0 && (
+                        {dynamicWalletData.length === 0 && (
                           <tr><td colSpan={7} className="py-20 text-center text-slate-600 italic uppercase font-bold text-[10px]">Nenhuma movimentação bancÃ¡ria localizada</td></tr>
                         )}
                       </tbody>
@@ -965,7 +1394,7 @@ const FinanceHub: React.FC = () => {
                 </div>
               </div>
             </main>
-          </div>
+          </div >
         )
       }
 
@@ -1038,7 +1467,7 @@ const FinanceHub: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <button onClick={() => setAuditModal({ show: false, session: null, bankName: '', auditedBreakdown: {} })} className="p-2 hover:bg-white/5 rounded-full text-slate-500 hover:text-white transition-colors">
+                <button onClick={() => setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {}, readOnly: false })} className="p-2 hover:bg-white/5 rounded-full text-slate-500 hover:text-white transition-colors">
                   <X size={24} />
                 </button>
               </div>
@@ -1120,8 +1549,31 @@ const FinanceHub: React.FC = () => {
                                   className="w-full bg-slate-950 border border-slate-800 p-2.5 pl-8 rounded-xl text-white font-bold text-sm outline-none focus:border-brand-warning transition-all shadow-inner"
                                   value={auditModal.auditedBreakdown[item.id] || ''}
                                   onChange={e => setAuditModal({ ...auditModal, auditedBreakdown: { ...auditModal.auditedBreakdown, [item.id]: e.target.value } })}
+                                  disabled={auditModal.readOnly}
                                 />
                               </div>
+
+
+                              {/* SELETOR DE BANCO INDIVIDUAL PARA DINHEIRO E CHEQUE */}
+                              {
+                                (item.id === 'physical_cash' || item.id === 'physical_check') && (
+                                  <div className="mt-2 pt-2 border-t border-slate-800">
+                                    <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mb-1">Destino {item.id === 'physical_cash' ? 'Dinheiro' : 'Cheque'}</label>
+                                    <select
+                                      className="w-full bg-slate-950 border border-slate-800 p-2 rounded-lg text-white font-bold text-[10px] outline-none focus:border-brand-warning"
+                                      value={item.id === 'physical_cash' ? auditModal.bankNameCash : auditModal.bankNameCheck}
+                                      onChange={e => setAuditModal({
+                                        ...auditModal,
+                                        [item.id === 'physical_cash' ? 'bankNameCash' : 'bankNameCheck']: e.target.value
+                                      })}
+                                      disabled={auditModal.readOnly}
+                                    >
+                                      <option value="">{auditModal.readOnly ? (item.id === 'physical_cash' ? auditModal.bankNameCash : auditModal.bankNameCheck) : 'SELECIONE A CONTA...'}</option>
+                                      {!auditModal.readOnly && banks.map(b => <option key={b.id} value={b.name}>{b.name.toUpperCase()}</option>)}
+                                    </select>
+                                  </div>
+                                )
+                              }
                             </div>
                           );
                         })}
@@ -1315,37 +1767,37 @@ const FinanceHub: React.FC = () => {
 
                 {/* Destino BancÃ¡rio e BotÃ£o de Ação */}
                 <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row justify-between items-end gap-6">
-                  <div className="w-full md:w-96 space-y-2 text-left">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Banco Gerencial / Destino Master</label>
-                    <select
-                      required
-                      className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-black text-xs outline-none focus:border-brand-warning shadow-2xl"
-                      value={auditModal.bankName}
-                      onChange={e => setAuditModal({ ...auditModal, bankName: e.target.value })}
-                    >
-                      <option value="">SELECIONE A CONTA...</option>
-                      {banks.map(b => <option key={b.id} value={b.name}>{b.name.toUpperCase()}</option>)}
-                    </select>
-                  </div>
+                  {/* Destino Bancário removido do footer pois agora é individual por item físico */}
 
-                  {auditModal.session?.status !== 'reconciled' ? (
+                  {auditModal.session?.status === 'reconciled' ? (
+                    <div className="flex flex-col md:flex-row items-end md:items-center gap-4">
+                      <div className="px-8 py-4 bg-slate-800/50 rounded-xl border border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-brand-success" /> Turno já Reconciliado pelo Auditor em {new Date(auditModal.session.reconciledAt || (auditModal.session as any).reconciled_at || '').toLocaleDateString()}
+                      </div>
+                      <button
+                        onClick={handleReverseReconciliation}
+                        className="px-6 py-4 bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg hover:text-white flex items-center gap-2"
+                      >
+                        <Trash2 size={16} /> Estornar Conferência
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="submit"
-                      disabled={isAuditing}
-                      className="w-full md:w-auto px-12 py-5 bg-brand-warning text-black rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl shadow-brand-warning/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3"
+                      disabled={isAuditing || auditModal.readOnly}
+                      className={`w-full md:w-auto px-12 py-5 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl transition-all flex items-center justify-center gap-3 ${auditModal.readOnly
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none'
+                        : 'bg-brand-warning text-black shadow-brand-warning/20 hover:scale-105 active:scale-95'
+                        }`}
                     >
                       {isAuditing ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                       {isAuditing ? 'Efetivando...' : 'Efetivar Auditoria do Turno'}
                     </button>
-                  ) : (
-                    <div className="px-8 py-4 bg-slate-800/50 rounded-xl border border-slate-700 text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                      <ShieldCheck size={16} className="text-brand-success" /> Turno jÃ¡ Reconciliado pelo Auditor em {new Date(auditModal.session.reconciledAt || (auditModal.session as any).reconciled_at || '').toLocaleDateString()}
-                    </div>
                   )}
                 </div>
               </form>
             </div>
-          </div>
+          </div >
         )
       }
 
@@ -1355,21 +1807,21 @@ const FinanceHub: React.FC = () => {
           <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
             <div className="enterprise-card w-full max-md overflow-hidden shadow-2xl border-blue-500/30 animate-in zoom-in-95">
               <div className="p-6 border-b border-slate-800 bg-blue-500/5 flex justify-between items-center">
-                <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><PlusCircle className="text-blue-400" /> LanÃ§amento BancÃ¡rio</h2>
+                <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><PlusCircle className="text-blue-400" /> Lançamento Bancário</h2>
                 <button onClick={() => setShowWalletManualEntry(false)}><X size={24} className="text-slate-500" /></button>
               </div>
               <form onSubmit={handleWalletManualSubmit} className="p-8 space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   <button type="button" onClick={() => setWalletForm({ ...walletForm, tipo: 'ENTRADA' })} className={`py-4 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm ${walletForm.tipo === 'ENTRADA' ? 'bg-brand-success text-white border-brand-success shadow-brand-success/20' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>Entrada (+)</button>
-                  <button type="button" onClick={() => setWalletForm({ ...walletForm, tipo: 'SAIDA' })} className={`py-4 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm ${walletForm.tipo === 'SAIDA' ? 'bg-brand-error text-white border-brand-error shadow-brand-error/20' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>SaÃ­da (-)</button>
+                  <button type="button" onClick={() => setWalletForm({ ...walletForm, tipo: 'SAIDA' })} className={`py-4 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm ${walletForm.tipo === 'SAIDA' ? 'bg-brand-error text-white border-brand-error shadow-brand-error/20' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>Saída (-)</button>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Valor do LanÃ§amento</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Valor do Lançamento</label>
                   <input required placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-5 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-blue-400 transition-all shadow-inner" value={walletForm.valor} onChange={e => setWalletForm({ ...walletForm, valor: e.target.value })} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Conta BancÃ¡ria</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Conta Bancária</label>
                     <select required className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.parceiro} onChange={e => setWalletForm({ ...walletForm, parceiro: e.target.value })}>
                       <option value="">BANCO / CONTA...</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.name.toUpperCase()}</option>)}
@@ -1396,13 +1848,44 @@ const FinanceHub: React.FC = () => {
                 </div>
                 <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-sm tracking-widest shadow-xl shadow-blue-500/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3">
                   <CheckCircle2 size={20} />
-                  Efetivar LanÃ§amento
+                  Efetivar Lançamento
                 </button>
               </form>
             </div>
           </div>
         )
       }
+
+      {/* MODAL AUTH DELETE */}
+      <RequestAuthorizationModal
+        isOpen={isRequestDeleteAuthModalOpen}
+        onClose={() => setIsRequestDeleteAuthModalOpen(false)}
+        actionKey="CANCELAR_TRANSACAO_CARTEIRA"
+        actionLabel={`Solicitação para CANCELAR Transação ID: ${txToAuthorize?.id || txToAuthorize?.uuid}`}
+        details={`Transação: ${txToAuthorize?.descricao} | Valor: R$ ${(txToAuthorize?.valor_entrada || 0) + (txToAuthorize?.valor_saida || 0)}`}
+      />
+
+      {/* MODAL AUTH MANUAL ENTRY/EDIT COMMIT */}
+      <RequestAuthorizationModal
+        isOpen={isRequestManualAuthModalOpen}
+        onClose={() => setIsRequestManualAuthModalOpen(false)}
+        onSuccess={() => {
+          setShowWalletManualEntry(false);
+          setWalletForm({ tipo: 'ENTRADA', valor: '', categoria: '', parceiro: '', payment_term_id: '', descricao: '', id: '' });
+        }}
+        actionKey="LANCAMENTO_MANUAL_CARTEIRA"
+        actionLabel={`Lançamento: ${manualEntryToAuthorize?.descricao} | JSON: ${JSON.stringify(manualEntryToAuthorize)}`}
+        details={`Tipo: ${manualEntryToAuthorize?.tipo} | Valor: ${manualEntryToAuthorize?.valor} | Desc: ${manualEntryToAuthorize?.descricao}`}
+      />
+
+      {/* MODAL AUTH REVERSE */}
+      <RequestAuthorizationModal
+        isOpen={isRequestReverseAuthModalOpen}
+        onClose={() => setIsRequestReverseAuthModalOpen(false)}
+        actionKey="ESTORNAR_TRANSACAO_CARTEIRA"
+        actionLabel={`Solicitação para ESTORNAR Transação ID: ${txToAuthorize?.id || txToAuthorize?.uuid}`}
+        details={`Transação: ${txToAuthorize?.descricao} | Valor: R$ ${(txToAuthorize?.valor_entrada || 0) + (txToAuthorize?.valor_saida || 0)}`}
+      />
     </div >
   );
 };

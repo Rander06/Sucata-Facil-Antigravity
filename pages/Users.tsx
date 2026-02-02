@@ -345,10 +345,11 @@ const Users: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-2 bg-slate-950/30 rounded-xl border border-slate-800">
                   {[
-                    { title: 'Dashboard', items: [PermissionModule.DASHBOARD, PermissionModule.SUPPORT_VIEW] },
+                    { title: 'Dashboard', items: [PermissionModule.DASHBOARD] },
+                    { title: 'Suporte', items: [PermissionModule.SUPPORT_HELP_CHANNELS, PermissionModule.SUPPORT_SECURITY_BACKUP] },
                     { title: 'Relatórios (Granular)', items: [PermissionModule.REPORTS_GENERAL, PermissionModule.REPORTS_RECEIVABLES, PermissionModule.REPORTS_PAYABLES, PermissionModule.REPORTS_STOCK, PermissionModule.REPORTS_PARTNERS, PermissionModule.REPORTS_AUDIT] },
                     { title: 'Vendas (PDV)', items: [PermissionModule.SALES_VIEW, PermissionModule.SALES_CREATE, PermissionModule.SALES_CLOSE_CASHIER] },
-                    { title: 'Financeiro', items: [PermissionModule.FINANCE_VIEW, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE, PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_EXTRACT] },
+                    { title: 'Financeiro', items: [PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_AUDIT, PermissionModule.FINANCE_EXTRACT, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE] },
                     { title: 'Compras', items: [PermissionModule.PURCHASES_VIEW, PermissionModule.PURCHASES_CREATE, PermissionModule.PURCHASES_EDIT, PermissionModule.PURCHASES_DELETE] },
                     { title: 'Estoque', items: [PermissionModule.STOCK_VIEW, PermissionModule.STOCK_CREATE, PermissionModule.STOCK_EDIT, PermissionModule.STOCK_DELETE, PermissionModule.STOCK_ADJUST] },
                     { title: 'Parceiros', items: [PermissionModule.PARTNERS_VIEW, PermissionModule.PARTNERS_CREATE, PermissionModule.PARTNERS_EDIT, PermissionModule.PARTNERS_DELETE] },
@@ -500,10 +501,11 @@ const Users: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-2 bg-slate-950/30 rounded-xl border border-slate-800">
                   {[
-                    { title: 'Dashboard', items: [PermissionModule.DASHBOARD, PermissionModule.SUPPORT_VIEW] },
+                    { title: 'Dashboard', items: [PermissionModule.DASHBOARD] },
+                    { title: 'Suporte', items: [PermissionModule.SUPPORT_HELP_CHANNELS, PermissionModule.SUPPORT_SECURITY_BACKUP] },
                     { title: 'Relatórios (Granular)', items: [PermissionModule.REPORTS_GENERAL, PermissionModule.REPORTS_RECEIVABLES, PermissionModule.REPORTS_PAYABLES, PermissionModule.REPORTS_STOCK, PermissionModule.REPORTS_PARTNERS, PermissionModule.REPORTS_AUDIT] },
                     { title: 'Vendas (PDV)', items: [PermissionModule.SALES_VIEW, PermissionModule.SALES_CREATE, PermissionModule.SALES_CLOSE_CASHIER] },
-                    { title: 'Financeiro', items: [PermissionModule.FINANCE_VIEW, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE, PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_EXTRACT] },
+                    { title: 'Financeiro', items: [PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_AUDIT, PermissionModule.FINANCE_EXTRACT, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE] },
                     { title: 'Compras', items: [PermissionModule.PURCHASES_VIEW, PermissionModule.PURCHASES_CREATE, PermissionModule.PURCHASES_EDIT, PermissionModule.PURCHASES_DELETE] },
                     { title: 'Estoque', items: [PermissionModule.STOCK_VIEW, PermissionModule.STOCK_CREATE, PermissionModule.STOCK_EDIT, PermissionModule.STOCK_DELETE, PermissionModule.STOCK_ADJUST] },
                     { title: 'Parceiros', items: [PermissionModule.PARTNERS_VIEW, PermissionModule.PARTNERS_CREATE, PermissionModule.PARTNERS_EDIT, PermissionModule.PARTNERS_DELETE] },

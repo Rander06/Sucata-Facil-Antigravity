@@ -398,12 +398,159 @@ Valor envolvido: ${val}`;
               <div className="flex flex-col md:flex-row bg-slate-950/80 p-4 rounded-2xl border border-slate-800 items-center gap-6 w-full md:w-fit no-print">
                 <div className="flex items-center gap-4"><Calendar size={18} className="text-brand-success" />
                   <div className="flex items-center gap-3">
-                    <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                    <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
                     <span className="text-slate-600 font-bold text-[10px]">ATÉ</span>
-                    <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
+                    <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
                   </div>
                 </div>
                 <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+
+                {/* FILTROS: EXTRATO / A RECEBER / A PAGAR */}
+                {(activeModal === 'financial_statement' || activeModal === 'receivables_mirror' || activeModal === 'payables_mirror') && (
+                  <>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Natureza</span>
+                      <select
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-24"
+                        value={filters.natureza || ''}
+                        onChange={e => updateFilter('natureza', e.target.value)}
+                      >
+                        <option value="">TODAS</option>
+                        <option value="ENTRADA">ENTRADA</option>
+                        <option value="SAIDA">SAÍDA</option>
+                      </select>
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Parceiro</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-32"
+                        placeholder="Nome..."
+                        value={filters.partner || ''}
+                        onChange={e => updateFilter('partner', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Desc.</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-32"
+                        placeholder="Identificação..."
+                        value={filters.description || ''}
+                        onChange={e => updateFilter('description', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Status</span>
+                      <select
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-24"
+                        value={filters.status || ''}
+                        onChange={e => updateFilter('status', e.target.value)}
+                      >
+                        <option value="">TODOS</option>
+                        <option value="ABERTO">ABERTO</option>
+                        <option value="LIQUIDADO">LIQUIDADO</option>
+                        <option value="ATRASADO">ATRASADO</option>
+                        <option value="CANCELADO">CANCELADO</option>
+                      </select>
+                    </div>
+                    <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+                  </>
+                )}
+
+                {/* FILTROS: ESTOQUE */}
+                {activeModal === 'inventory_report' && (
+                  <>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Material</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-48"
+                        placeholder="Buscar material..."
+                        value={filters.material_name || ''}
+                        onChange={e => updateFilter('material_name', e.target.value)}
+                      />
+                    </div>
+                    <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+                  </>
+                )}
+
+                {/* FILTROS: PARCEIROS */}
+                {activeModal === 'partners_report' && (
+                  <>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Nome</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-32"
+                        placeholder="Buscar parceiro..."
+                        value={filters.partner_name_rep || ''}
+                        onChange={e => updateFilter('partner_name_rep', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Doc</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-24"
+                        placeholder="CPF/CNPJ..."
+                        value={filters.partner_doc_rep || ''}
+                        onChange={e => updateFilter('partner_doc_rep', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Tipo</span>
+                      <select
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-24"
+                        value={filters.partner_type_rep || ''}
+                        onChange={e => updateFilter('partner_type_rep', e.target.value)}
+                      >
+                        <option value="">TODOS</option>
+                        <option value="supplier">FORNECEDOR</option>
+                        <option value="customer">CLIENTE</option>
+                      </select>
+                    </div>
+                    <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+                  </>
+                )}
+
+                {activeModal === 'audit_report' && (
+                  <>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Usuário</span>
+                      <select
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-32"
+                        value={filters.log_user || ''}
+                        onChange={e => updateFilter('log_user', e.target.value)}
+                      >
+                        <option value="">TODOS</option>
+                        {users.map(u => <option key={u.id} value={u.name}>{u.name.toUpperCase()}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Ação</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-32"
+                        placeholder="Buscar ação..."
+                        value={filters.log_action || ''}
+                        onChange={e => updateFilter('log_action', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-xl items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-500 uppercase px-2">Detalhes</span>
+                      <input
+                        type="text"
+                        className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none w-48"
+                        placeholder="Buscar narrativa..."
+                        value={filters.log_detail || ''}
+                        onChange={e => updateFilter('log_detail', e.target.value)}
+                      />
+                    </div>
+                    <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+                  </>
+                )}
+
                 <button onClick={triggerRefresh} className="w-full md:w-auto px-6 py-2.5 bg-brand-success/10 text-brand-success border border-brand-success/30 rounded-xl font-black uppercase text-[10px] hover:bg-brand-success hover:text-white transition-all shadow-lg flex items-center gap-2">{isLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Atualizar Filtros</button>
               </div>
 
@@ -426,14 +573,14 @@ Valor envolvido: ${val}`;
                             <th className="px-4 py-5 w-[140px]">Data Criação</th>
                             <th className="px-4 py-5 w-[140px]">Vencimento</th>
                             <th className="px-4 py-5 w-[140px]">Data Baixa</th>
-                            <th className="px-4 py-5 w-[120px]">Natureza <ColumnFilter col="natureza" placeholder="ENT/SAI" /></th>
-                            <th className="px-4 py-5 w-[250px]">Parceiro <ColumnFilter col="partner" placeholder="Filtrar..." /></th>
+                            <th className="px-4 py-5 w-[120px]">Natureza</th>
+                            <th className="px-4 py-5 w-[250px]">Parceiro</th>
                             <th className="px-4 py-5 w-[180px]">Categoria</th>
-                            <th className="px-4 py-5 w-[300px]">Identificação <ColumnFilter col="description" placeholder="Filtrar..." /></th>
+                            <th className="px-4 py-5 w-[300px]">Identificação</th>
                             <th className="px-4 py-5 w-[180px]">Meio/Prazo</th>
                             <th className="px-4 py-5 text-right w-[150px]">Valor Bruto</th>
                             <th className="px-4 py-5 w-[180px]">Membro</th>
-                            <th className="px-4 py-5 text-center w-[120px]">Status <ColumnFilter col="status" placeholder="Pago..." /></th>
+                            <th className="px-4 py-5 text-center w-[120px]">Status</th>
                             <th className="px-4 py-5 text-center w-[100px]">Transação</th>
                           </tr>
                         </thead>
@@ -479,9 +626,9 @@ Valor envolvido: ${val}`;
                         <thead>
                           <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             <th className="px-4 py-5 w-[180px]">Data / Horário</th>
-                            <th className="px-4 py-5 w-[220px]">Usuário Responsável <ColumnFilter col="log_user" placeholder="Filtrar..." /></th>
-                            <th className="px-4 py-5 w-[200px]">Ação Realizada <ColumnFilter col="log_action" placeholder="Filtrar..." /></th>
-                            <th className="px-4 py-5 w-[900px]">Informações Narrativas de Auditoria <ColumnFilter col="log_detail" placeholder="Pesquisar narrativa..." /></th>
+                            <th className="px-4 py-5 w-[220px]">Usuário Responsável</th>
+                            <th className="px-4 py-5 w-[200px]">Ação Realizada</th>
+                            <th className="px-4 py-5 w-[900px]">Informações Narrativas de Auditoria</th>
                           </tr>
                         </thead>
                       </table>
@@ -511,7 +658,7 @@ Valor envolvido: ${val}`;
                         <thead>
                           <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             <th className="px-4 py-5 w-[100px]"># ID</th>
-                            <th className="px-4 py-5 w-[300px]">Material <ColumnFilter col="material_name" placeholder="Buscar..." /></th>
+                            <th className="px-4 py-5 w-[300px]">Material</th>
                             <th className="px-4 py-5 text-center w-[100px]">Unidade</th>
                             <th className="px-4 py-5 text-right w-[150px]">Pr. Compra</th>
                             <th className="px-4 py-5 text-right w-[150px]">Pr. Venda</th>
@@ -551,10 +698,10 @@ Valor envolvido: ${val}`;
                         <thead>
                           <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             <th className="px-4 py-5 w-[120px]"># ID</th>
-                            <th className="px-4 py-5 w-[350px]">Parceiro <ColumnFilter col="partner_name_rep" placeholder="Buscar..." /></th>
-                            <th className="px-4 py-5 w-[200px]">CPF / CNPJ <ColumnFilter col="partner_doc_rep" placeholder="Doc..." /></th>
+                            <th className="px-4 py-5 w-[350px]">Parceiro</th>
+                            <th className="px-4 py-5 w-[200px]">CPF / CNPJ</th>
                             <th className="px-4 py-5 w-[180px]">Telefone</th>
-                            <th className="px-4 py-5 w-[150px] text-center">Tipo <ColumnFilter col="partner_type_rep" placeholder="In/Out" /></th>
+                            <th className="px-4 py-5 w-[150px] text-center">Tipo</th>
                             <th className="px-4 py-5 w-[200px]">Data Cadastro</th>
                           </tr>
                         </thead>

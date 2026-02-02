@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db as dbService } from '../services/dbService';
-import { Material, Partner, Transaction, FinancialRecord, PermissionModule, CashierSession, PaymentTerm, FinanceCategory, User, WalletTransaction, Bank, AuthorizationRequest } from '../types';
+import { Material, Partner, Transaction, FinancialRecord, PermissionModule, CashierSession, PaymentTerm, FinanceCategory, User, WalletTransaction, Bank, AuthorizationRequest, UserRole, OperationalProfile } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import { authorizationService } from '../services/authorizationService';
 import {
@@ -89,6 +89,8 @@ const POS: React.FC = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedPartnerId, setSelectedPartnerId] = useState('');
   const [type, setType] = useState<'buy' | 'sell'>(() => {
+    const isSuperUser = currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER;
+    if (isSuperUser) return 'sell'; // Default to sell for admins
     if (currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) return 'buy';
     if (currentUser?.permissions.includes(PermissionModule.SALES_VIEW)) return 'sell';
     return 'buy'; // Fallback
@@ -880,10 +882,10 @@ const POS: React.FC = () => {
           <div className="flex-1 space-y-6">
             <div className="enterprise-card p-4 flex flex-col md:flex-row gap-4 items-center bg-slate-900/50">
               <div className="flex bg-brand-dark p-1 rounded-xl border border-slate-800 w-full md:w-auto">
-                {currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW) && (
+                {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) && (
                   <button onClick={() => { if (!editingRecordId) { setType('buy'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
                 )}
-                {currentUser?.permissions.includes(PermissionModule.SALES_VIEW) && (
+                {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.SALES_VIEW)) && (
                   <button onClick={() => { if (!editingRecordId) { setType('sell'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'sell' ? 'bg-brand-success text-white' : 'text-slate-500'}`}>Venda</button>
                 )}
               </div>

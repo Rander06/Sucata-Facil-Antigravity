@@ -44,6 +44,7 @@ export const TableLayout = ({
             <table className="w-full text-left min-w-[1000px]">
                 <thead>
                     <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest bg-slate-900/40">
+                        <th className="px-6 py-5">Turno (PDV)</th>
                         <th className="px-6 py-5">Vencimento</th>
                         <th className="px-6 py-5">Parceiro</th>
                         <th className="px-6 py-5">Identificação</th>
@@ -58,6 +59,7 @@ export const TableLayout = ({
                         const partner = partners.find(p => p.id === record.parceiro_id);
                         return (
                             <tr key={record.id} className="hover:bg-slate-800/20 transition-all text-xs font-medium">
+                                <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">{record.caixa_id ? `#${record.caixa_id.slice(0, 8).toUpperCase()}` : '---'}</td>
                                 <td className="px-6 py-4 font-mono text-slate-400">{record.dueDate || record.due_date || '---'}</td>
                                 <td className="px-6 py-4 truncate max-w-[200px] uppercase text-slate-200 font-bold">{partner?.name || 'CONSUMIDOR FINAL'}</td>
                                 <td className="px-6 py-4 truncate max-w-[300px] uppercase text-slate-400">{record.description}</td>

@@ -66,7 +66,15 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
   const filteredMenu = menuItems.filter(item => {
     if (isMasterUser) return true;
     // Admins da empresa também têm acesso total aos módulos operacionais
-    if (currentUser.role === UserRole.COMPANY_ADMIN && item.category === 'OPERACIONAL') return true;
+    if ((currentUser.role === UserRole.COMPANY_ADMIN || currentUser.role === UserRole.SUPER_ADMIN) && item.category === 'OPERACIONAL') return true;
+
+    if (item.id === 'support') {
+      return (
+        currentUser.permissions.includes(PermissionModule.SUPPORT_VIEW) ||
+        currentUser.permissions.includes(PermissionModule.SUPPORT_HELP_CHANNELS) ||
+        currentUser.permissions.includes(PermissionModule.SUPPORT_SECURITY_BACKUP)
+      );
+    }
 
     if (item.id === 'registration') {
       const registrationPermissions = [
@@ -79,6 +87,30 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
     }
     if (item.id === 'pos') {
       return currentUser.permissions.includes(PermissionModule.PURCHASES_VIEW) || currentUser.permissions.includes(PermissionModule.SALES_VIEW);
+    }
+    if (item.id === 'reports') {
+      const reportPermissions = [
+        PermissionModule.REPORTS_VIEW,
+        PermissionModule.REPORTS_GENERAL,
+        PermissionModule.REPORTS_RECEIVABLES,
+        PermissionModule.REPORTS_PAYABLES,
+        PermissionModule.REPORTS_STOCK,
+        PermissionModule.REPORTS_PARTNERS,
+        PermissionModule.REPORTS_AUDIT
+      ];
+      return reportPermissions.some(p => currentUser.permissions.includes(p));
+    }
+
+    if (item.id === 'finance-hub') {
+      return (
+        currentUser.permissions.includes(PermissionModule.FINANCE_VIEW) ||
+        currentUser.permissions.includes(PermissionModule.FINANCE_LIQUIDATE) ||
+        currentUser.permissions.includes(PermissionModule.FINANCE_AUDIT) ||
+        currentUser.permissions.includes(PermissionModule.FINANCE_EXTRACT) ||
+        currentUser.permissions.includes(PermissionModule.FINANCE_CREATE) ||
+        currentUser.permissions.includes(PermissionModule.FINANCE_EDIT) ||
+        currentUser.permissions.includes(PermissionModule.FINANCE_DELETE)
+      );
     }
     return currentUser.permissions.includes(item.permission as PermissionModule);
   });
