@@ -2432,12 +2432,7 @@ const FinanceHub: React.FC = () => {
 
                 <button
                   onClick={() => setShowWalletManualEntry(true)}
-                  disabled={!activeFinanceSession}
-                  title={!activeFinanceSession ? "Abra o Caixa Financeiro para lançar" : ""}
-                  className={`w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all ${!activeFinanceSession
-                    ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
-                    : "bg-brand-success text-white shadow-brand-success/20 hover:scale-105"
-                    }`}
+                  className="w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all bg-brand-success text-white shadow-brand-success/20 hover:scale-105"
                 >
                   Novo Lançamento
                 </button>
