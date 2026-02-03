@@ -1,6 +1,7 @@
 import React from 'react';
+import { Pencil as IconEdit, Trash2 as IconTrash, RotateCcw } from 'lucide-react';
+import { FinancialRecord, Partner, CashierSession, User } from '../types';
 import { db } from '../services/dbService';
-import { FinancialRecord, Partner, CashierSession } from '../types';
 
 const getStatusInfo = (record: FinancialRecord) => {
     const isCanceled = record.status === 'reversed' || record.is_reversed || record.isReversed;
@@ -15,32 +16,34 @@ const getStatusInfo = (record: FinancialRecord) => {
     return { label: 'ABERTO', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', isStriked: false };
 };
 
-import { Pencil as IconEdit, Trash2 as IconTrash, RotateCcw } from 'lucide-react';
-
 export const TableLayout = ({
     title,
     items,
     icon: Icon,
     iconColor,
     partners,
+    users,
     activeSession,
     isLiquidating,
     setLiquidationModal,
     onEdit,
     onDelete,
-    onReverse
+    onReverse,
+    showBaixar
 }: {
     title: string,
     items: FinancialRecord[],
     icon: any,
     iconColor: string,
     partners: Partner[],
+    users: User[],
     activeSession: CashierSession | null,
     isLiquidating: boolean,
     setLiquidationModal: (data: any) => void,
     onEdit?: (record: FinancialRecord) => void,
     onDelete?: (record: FinancialRecord) => void,
-    onReverse?: (record: FinancialRecord) => void
+    onReverse?: (record: FinancialRecord) => void,
+    showBaixar?: boolean
 }) => {
     return (
         <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800 mb-8 bg-slate-900/40">
@@ -50,12 +53,15 @@ export const TableLayout = ({
                 </h2>
             </div>
             <div className="overflow-x-auto scrollbar-thick">
-                <table className="w-full text-left min-w-[1000px]">
+                <table className="w-full text-left min-w-[1200px]">
                     <thead>
                         <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest bg-slate-900/40">
                             <th className="px-6 py-5">Turno (ID)</th>
+                            <th className="px-6 py-5">Criação</th>
                             <th className="px-6 py-5">Vencimento</th>
+                            <th className="px-6 py-5">Operador</th>
                             <th className="px-6 py-5">Parceiro</th>
+                            <th className="px-6 py-5">Categoria</th>
                             <th className="px-6 py-5">Identificação</th>
                             <th className="px-6 py-5 text-right">Valor Bruto</th>
                             <th className="px-6 py-5 text-center">Status</th>
@@ -69,28 +75,37 @@ export const TableLayout = ({
                             return (
                                 <tr key={record.id} className="hover:bg-slate-800/20 transition-all text-xs font-medium">
                                     <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">{record.caixa_id ? `#${record.caixa_id.slice(0, 8).toUpperCase()}` : '---'}</td>
+                                    <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">{record.created_at ? new Date(record.created_at).toLocaleDateString('pt-BR') : '---'}</td>
                                     <td className="px-6 py-4 font-mono text-slate-400">{record.dueDate || record.due_date || '---'}</td>
+                                    <td className="px-6 py-4 truncate text-brand-success font-black text-[10px] uppercase">
+                                        {(users || []).find(u => u.id === record.usuario_id || u.id === record.user_id || (u as any).user_id === record.user_id)?.name || 'SISTEMA'}
+                                    </td>
                                     <td className="px-6 py-4 truncate max-w-[200px] uppercase text-slate-200 font-bold">{partner?.name || 'CONSUMIDOR FINAL'}</td>
+                                    <td className="px-6 py-4 truncate text-blue-400 font-black text-[10px] uppercase">{record.categoria}</td>
                                     <td className="px-6 py-4 truncate max-w-[300px] uppercase text-slate-400">{record.description}</td>
                                     <td className={`px-6 py-4 text-right font-black ${record.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {record.valor.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                     <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded-full text-[8px] font-black uppercase border shadow-sm ${statusInfo.color}`}>{statusInfo.label}</span></td>
                                     <td className="px-6 py-4 text-right no-print flex items-center justify-end gap-2">
                                         {(!record.transaction_id && record.tipo !== 'vendas' && record.tipo !== 'compras') && (
                                             <>
-                                                <button
-                                                    onClick={() => onEdit && onEdit(record)}
-                                                    className="p-2 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-all"
-                                                    title="Editar"
-                                                >
-                                                    <IconEdit size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => onDelete && onDelete(record)}
-                                                    className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-all"
-                                                    title="Excluir"
-                                                >
-                                                    <IconTrash size={16} />
-                                                </button>
+                                                {onEdit && (
+                                                    <button
+                                                        onClick={() => onEdit(record)}
+                                                        className="p-2 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-all"
+                                                        title="Editar"
+                                                    >
+                                                        <IconEdit size={16} />
+                                                    </button>
+                                                )}
+                                                {onDelete && (
+                                                    <button
+                                                        onClick={() => onDelete(record)}
+                                                        className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-all"
+                                                        title="Excluir"
+                                                    >
+                                                        <IconTrash size={16} />
+                                                    </button>
+                                                )}
                                             </>
                                         )}
                                         {record.status === 'paid' && onReverse && (
@@ -102,19 +117,21 @@ export const TableLayout = ({
                                                 <RotateCcw size={16} />
                                             </button>
                                         )}
-                                        <button
-                                            disabled={!activeSession || isLiquidating || record.status === 'paid' || record.status === 'reversed'}
-                                            onClick={() => setLiquidationModal({ show: true, record, termId: '', dueDate: record.dueDate || record.due_date || db.getToday(), receivedValue: '' })}
-                                            className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all ${!activeSession || record.status === 'paid' || record.status === 'reversed' ? 'bg-slate-800 text-slate-600' : 'bg-brand-success text-white hover:scale-105'}`}
-                                        >
-                                            Baixar
-                                        </button>
+                                        {showBaixar !== false && (
+                                            <button
+                                                disabled={!activeSession || isLiquidating || record.status === 'paid' || record.status === 'reversed'}
+                                                onClick={() => setLiquidationModal({ show: true, record, termId: '', dueDate: record.dueDate || record.due_date || db.getToday(), receivedValue: '' })}
+                                                className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all ${!activeSession || record.status === 'paid' || record.status === 'reversed' ? 'bg-slate-800 text-slate-600' : 'bg-brand-success text-white hover:scale-105'}`}
+                                            >
+                                                Baixar
+                                            </button>
+                                        )}
                                     </td>
                                 </tr>
                             );
                         })}
                         {items.length === 0 && (
-                            <tr><td colSpan={6} className="py-20 text-center text-slate-600 italic uppercase font-bold text-[10px]">Nenhum título localizado com os filtros aplicados</td></tr>
+                            <tr><td colSpan={10} className="py-20 text-center text-slate-600 italic uppercase font-bold text-[10px]">Nenhum título localizado com os filtros aplicados</td></tr>
                         )}
                     </tbody>
                 </table>

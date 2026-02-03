@@ -917,7 +917,8 @@ const POS: React.FC = () => {
                 )}
               </div>
               <div className="flex-1 flex items-center gap-4 bg-brand-dark border border-slate-800 rounded-xl px-4 py-2.5 w-full focus-within:border-brand-success transition-all">
-                <Search size={18} className="text-slate-500" /><input type="text" placeholder="Localizar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={search} onChange={e => setSearchTerm(e.target.value)} />
+                <label htmlFor="pos-search" className="sr-only">Localizar material</label>
+                <Search size={18} className="text-slate-500" /><input id="pos-search" name="pos-search" type="text" placeholder="Localizar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={search} onChange={e => setSearchTerm(e.target.value)} />
               </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar p-1">
@@ -940,7 +941,10 @@ const POS: React.FC = () => {
                   </button>
                   {isPartnerMenuOpen && (
                     <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                      <div className="p-3 border-b border-slate-800 flex items-center gap-2 bg-slate-950/50"><Search size={14} className="text-slate-500" /><input type="text" autoFocus placeholder="Filtrar..." className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold" value={partnerSearch} onChange={e => setPartnerSearch(e.target.value)} /></div>
+                      <div className="p-3 border-b border-slate-800 flex items-center gap-2 bg-slate-950/50">
+                        <label htmlFor="pos-partnerSearch" className="sr-only">Filtrar parceiro</label>
+                        <Search size={14} className="text-slate-500" /><input id="pos-partnerSearch" name="pos-partnerSearch" type="text" autoFocus placeholder="Filtrar..." className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold" value={partnerSearch} onChange={e => setPartnerSearch(e.target.value)} />
+                      </div>
                       <div className="max-h-60 overflow-y-auto custom-scrollbar">{sortedPartners.map(p => (<button key={p.id} onClick={() => { setSelectedPartnerId(p.id); setIsPartnerMenuOpen(false); }} className="w-full text-left px-4 py-3 hover:bg-brand-success/10 text-[10px] font-bold text-slate-300 uppercase transition-colors border-b border-slate-800/30 last:border-0 flex items-center justify-between"><span>{p.name}</span><ChevronRight size={12} className="text-brand-success" /></button>))}</div>
                     </div>
                   )}
@@ -952,8 +956,8 @@ const POS: React.FC = () => {
                     <button onClick={() => setCart(cart.filter(i => i.id !== item.id))} className="absolute top-4 right-4 text-slate-600 hover:text-brand-error transition-colors p-1"><X size={16} /></button>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate max-w-[80%]">{item.material.name}</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1"><label className="text-[8px] uppercase text-slate-600 font-black">Qtd ({item.unit})</label><input type="number" className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.quantity} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, quantity: parseFloat(e.target.value) || 0 } : i))} /></div>
-                      <div className="space-y-1"><label className="text-[8px] uppercase text-slate-600 font-black">Preço Unit.</label><input type="number" className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.appliedPrice} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, appliedPrice: parseFloat(e.target.value) || 0 } : i))} /></div>
+                      <div className="space-y-1"><label htmlFor={`cart-quantity-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Qtd ({item.unit})</label><input id={`cart-quantity-${item.id}`} name={`cart-quantity-${item.id}`} type="number" className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.quantity} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, quantity: parseFloat(e.target.value) || 0 } : i))} /></div>
+                      <div className="space-y-1"><label htmlFor={`cart-price-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Preço Unit.</label><input id={`cart-price-${item.id}`} name={`cart-price-${item.id}`} type="number" className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.appliedPrice} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, appliedPrice: parseFloat(e.target.value) || 0 } : i))} /></div>
                     </div>
                   </div>
                 ))}
@@ -1089,22 +1093,22 @@ const POS: React.FC = () => {
               <form onSubmit={handleOpenCashierSubmit} className="space-y-6">
                 <div className="space-y-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Fundo de Troco Inicial (BRL)</label>
-                    <input required autoFocus type="text" placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success transition-all" value={openingBalanceInput} onChange={e => setOpeningBalanceInput(e.target.value)} />
+                    <label htmlFor="opening-balance" className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Fundo de Troco Inicial (BRL)</label>
+                    <input id="opening-balance" name="opening-balance" required autoFocus type="text" placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success transition-all" value={openingBalanceInput} onChange={e => setOpeningBalanceInput(e.target.value)} />
                   </div>
 
                   {!editingRecordId && (
                     <div className="grid grid-cols-1 gap-4">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block flex items-center gap-2"><Landmark size={12} /> Conta Bancária (Origem)</label>
-                        <select required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={openingBankId} onChange={e => setOpeningBankId(e.target.value)}>
+                        <label htmlFor="opening-bank" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block flex items-center gap-2"><Landmark size={12} /> Conta Bancária (Origem)</label>
+                        <select id="opening-bank" name="opening-bank" required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={openingBankId} onChange={e => setOpeningBankId(e.target.value)}>
                           <option value="">SELECIONE A CONTA...</option>
                           {banks.map(b => <option key={b.id} value={b.id}>{b.name.toUpperCase()}</option>)}
                         </select>
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block flex items-center gap-2"><ArrowRightLeft size={12} /> Meio de Pagamento</label>
-                        <select required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={openingTermId} onChange={e => setOpeningTermId(e.target.value)}>
+                        <label htmlFor="opening-term" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block flex items-center gap-2"><ArrowRightLeft size={12} /> Meio de Pagamento</label>
+                        <select id="opening-term" name="opening-term" required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={openingTermId} onChange={e => setOpeningTermId(e.target.value)}>
                           <option value="">SELECIONE A FORMA...</option>
                           {openingTerms.map(t => <option key={t.id} value={t.uuid || t.id}>{t.name.toUpperCase()}</option>)}
                         </select>
@@ -1198,10 +1202,10 @@ const POS: React.FC = () => {
                   <div className="space-y-4">
                     {dynamicClosingItems.filter(i => i.group === 'FISICO').map(item => (
                       <div key={item.id} className="space-y-2">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">{item.label}</label>
+                        <label htmlFor={`closing-${item.id}`} className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">{item.label}</label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-600">R$</span>
-                          <input required type="text" onKeyDown={handleClosingKeyDown} placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 pl-10 rounded-xl text-white font-black text-lg outline-none focus:border-brand-success focus:ring-1 focus:ring-brand-success/20 transition-all" value={closingBreakdown[item.id] || ''} onChange={e => setClosingBreakdown({ ...closingBreakdown, [item.id]: e.target.value })} />
+                          <input id={`closing-${item.id}`} name={item.id} required={item.group === 'FISICO'} type="text" onKeyDown={handleClosingKeyDown} placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 pl-10 rounded-xl text-white font-black text-lg outline-none focus:border-brand-success focus:ring-1 focus:ring-brand-success/20 transition-all" value={closingBreakdown[item.id] || ''} onChange={e => setClosingBreakdown({ ...closingBreakdown, [item.id]: e.target.value })} />
                         </div>
                       </div>
                     ))}
@@ -1216,10 +1220,10 @@ const POS: React.FC = () => {
                   <div className="grid grid-cols-1 gap-4">
                     {dynamicClosingItems.filter(i => i.group === 'ENTRADA_INFO').map(item => (
                       <div key={item.id} className="space-y-2">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">{item.label}</label>
+                        <label htmlFor={`closing-${item.id}`} className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">{item.label}</label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-600">R$</span>
-                          <input type="text" onKeyDown={handleClosingKeyDown} placeholder="0,00" className="w-full bg-slate-900/50 border border-slate-800 p-3 pl-10 rounded-xl text-white font-bold text-sm outline-none focus:border-blue-500 transition-all" value={closingBreakdown[item.id] || ''} onChange={e => setClosingBreakdown({ ...closingBreakdown, [item.id]: e.target.value })} />
+                          <input id={`closing-${item.id}`} name={item.id} type="text" onKeyDown={handleClosingKeyDown} placeholder="0,00" className="w-full bg-slate-900/50 border border-slate-800 p-3 pl-10 rounded-xl text-white font-bold text-sm outline-none focus:border-blue-500 transition-all" value={closingBreakdown[item.id] || ''} onChange={e => setClosingBreakdown({ ...closingBreakdown, [item.id]: e.target.value })} />
                         </div>
                       </div>
                     ))}
@@ -1234,10 +1238,10 @@ const POS: React.FC = () => {
                   <div className="grid grid-cols-1 gap-4">
                     {dynamicClosingItems.filter(i => i.group === 'SAIDA_INFO').map(item => (
                       <div key={item.id} className="space-y-2">
-                        <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">{item.label}</label>
+                        <label htmlFor={`closing-${item.id}`} className="text-[9px] font-black text-slate-500 uppercase tracking-widest block">{item.label}</label>
                         <div className="relative">
                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-600">R$</span>
-                          <input type="text" onKeyDown={handleClosingKeyDown} placeholder="0,00" className="w-full bg-slate-900/50 border border-slate-800 p-3 pl-10 rounded-xl text-white font-bold text-sm outline-none focus:border-brand-error/50 transition-all" value={closingBreakdown[item.id] || ''} onChange={e => setClosingBreakdown({ ...closingBreakdown, [item.id]: e.target.value })} />
+                          <input id={`closing-${item.id}`} name={item.id} type="text" onKeyDown={handleClosingKeyDown} placeholder="0,00" className="w-full bg-slate-900/50 border border-slate-800 p-3 pl-10 rounded-xl text-white font-bold text-sm outline-none focus:border-brand-error/50 transition-all" value={closingBreakdown[item.id] || ''} onChange={e => setClosingBreakdown({ ...closingBreakdown, [item.id]: e.target.value })} />
                         </div>
                       </div>
                     ))}
@@ -1270,27 +1274,27 @@ const POS: React.FC = () => {
                 <button type="button" onClick={() => setManualEntryForm({ ...manualEntryForm, tipo: 'saída' })} className={`py-4 rounded-xl font-black text-[10px] uppercase transition-all ${manualEntryForm.tipo === 'saída' ? 'bg-brand-error text-white' : 'bg-slate-800 text-slate-500'}`}>Saída (-)</button>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Valor do Lançamento</label>
-                <input required placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-brand-success transition-all" value={manualEntryForm.valor} onChange={e => setManualEntryForm({ ...manualEntryForm, valor: e.target.value })} />
+                <label htmlFor="manual-valor" className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Valor do Lançamento</label>
+                <input id="manual-valor" name="manual-valor" required placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-brand-success transition-all" value={manualEntryForm.valor} onChange={e => setManualEntryForm({ ...manualEntryForm, valor: e.target.value })} />
               </div>
               <div className="space-y-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Meio de Pagamento</label>
-                  <select required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={manualEntryForm.paymentTermId} onChange={e => setManualEntryForm({ ...manualEntryForm, paymentTermId: e.target.value })}>
+                  <label htmlFor="manual-term" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Meio de Pagamento</label>
+                  <select id="manual-term" name="manual-term" required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={manualEntryForm.paymentTermId} onChange={e => setManualEntryForm({ ...manualEntryForm, paymentTermId: e.target.value })}>
                     <option value="">SELECIONE A FORMA...</option>
                     {filteredManualPdvTerms.map(t => <option key={t.id} value={t.id || t.uuid}>{t.name.toUpperCase()}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Categoria</label>
-                  <select required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={manualEntryForm.categoria} onChange={e => setManualEntryForm({ ...manualEntryForm, categoria: e.target.value })}>
+                  <label htmlFor="manual-cat" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Categoria</label>
+                  <select id="manual-cat" name="manual-cat" required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={manualEntryForm.categoria} onChange={e => setManualEntryForm({ ...manualEntryForm, categoria: e.target.value })}>
                     <option value="">SELECIONE A CATEGORIA...</option>
                     {categoriesManual.map(c => <option key={c.id} value={c.name}>{c.name.toUpperCase()}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Descrição</label>
-                  <input placeholder="Ex: Pagamento de Frete" className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={manualEntryForm.descricao} onChange={e => setManualEntryForm({ ...manualEntryForm, descricao: e.target.value })} />
+                  <label htmlFor="manual-desc" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Descrição</label>
+                  <input id="manual-desc" name="manual-desc" placeholder="Ex: Pagamento de Frete" className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={manualEntryForm.descricao} onChange={e => setManualEntryForm({ ...manualEntryForm, descricao: e.target.value })} />
                 </div>
               </div>
               <button type="submit" className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-success/20 hover:scale-[1.01] active:scale-95 transition-all">
@@ -1316,8 +1320,10 @@ const POS: React.FC = () => {
               </div>
               <div className="space-y-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Meio de Pagamento</label>
+                  <label htmlFor="payment-term" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Meio de Pagamento</label>
                   <select
+                    id="payment-term"
+                    name="payment-term"
                     required
                     className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success"
                     value={paymentDefModal.termId}
@@ -1328,7 +1334,16 @@ const POS: React.FC = () => {
                       const days = term?.days || 0;
                       const calcDate = new Date();
                       calcDate.setDate(calcDate.getDate() + days);
-                      setPaymentDefModal({ ...paymentDefModal, termId: selId, dueDate: calcDate.toISOString().split('T')[0] });
+
+                      // Usar extração local para evitar erro de fuso (UTC vs Brasil)
+                      const localDate = new Intl.DateTimeFormat('en-CA', {
+                        timeZone: 'America/Sao_Paulo',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit'
+                      }).format(calcDate);
+
+                      setPaymentDefModal({ ...paymentDefModal, termId: selId, dueDate: localDate });
                     }}
                   >
                     <option value="">SELECIONE A FORMA...</option>
@@ -1336,8 +1351,8 @@ const POS: React.FC = () => {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Data do Pagamento / Vencimento</label>
-                  <input type="date" required className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={paymentDefModal.dueDate} onChange={e => setPaymentDefModal({ ...paymentDefModal, dueDate: e.target.value })} />
+                  <label htmlFor="payment-dueDate" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Data do Pagamento / Vencimento</label>
+                  <input id="payment-dueDate" name="payment-dueDate" type="date" required className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={paymentDefModal.dueDate} onChange={e => setPaymentDefModal({ ...paymentDefModal, dueDate: e.target.value })} />
                 </div>
               </div>
               <button type="submit" disabled={isSubmitting} className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-success/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3">

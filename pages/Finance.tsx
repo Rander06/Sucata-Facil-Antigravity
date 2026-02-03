@@ -3,10 +3,10 @@ import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
 import { PaymentTerm, FinanceCategory, PermissionModule, AuthorizationRequest } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
-import { 
-  Plus, 
-  X, 
-  Trash2, 
+import {
+  Plus,
+  X,
+  Trash2,
   Save,
   Tag,
   CreditCard,
@@ -31,47 +31,50 @@ interface FinanceProps {
 const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
   const { currentUser, pendingRequests, refreshRequests, refreshData } = useAppContext();
   const companyId = currentUser?.companyId || currentUser?.company_id || null;
-  
+
   const [paymentTerms, setPaymentTerms] = useState<PaymentTerm[]>([]);
   const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>([]);
-  
+
   const [showTermModal, setShowTermModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  
-  const [termFormData, setTermFormData] = useState({ 
-    name: '', 
-    days: 0, 
-    installments: 1, 
-    type: 'fixed' as 'fixed' | 'installments', 
-    show_in_sale: true, 
-    show_in_purchase: true, 
+
+  const [termFormData, setTermFormData] = useState({
+    name: '',
+    days: 0,
+    installments: 1,
+    type: 'fixed' as 'fixed' | 'installments',
+    show_in_sale: true,
+    show_in_purchase: true,
     show_in_settle: false,
     show_in_bank_manual: false,
     show_in_pdv_manual: false,
-    show_in_manual_pdv: false, 
+    show_in_manual_pdv: false,
     show_in_cashier_close: false,
-    show_in_opening: false
+    show_in_opening: false,
+    show_in_title_launch: false
   });
 
-  const [categoryFormData, setCategoryFormData] = useState({ 
-    name: '', 
-    type: 'both' as 'in' | 'out' | 'both', 
-    showInSales: true, 
-    showInPurchases: true, 
+  const [categoryFormData, setCategoryFormData] = useState({
+    name: '',
+    type: 'both' as 'in' | 'out' | 'both',
+    showInSales: true,
+    showInPurchases: true,
     showInLiquidation: true,
     show_in_bank_manual: true,
-    show_in_pdv_manual: true
+    show_in_pdv_manual: true,
+    show_in_title_launch: true
   });
-  
+
   const [isRequestAuthModalOpen, setIsRequestAuthModalOpen] = useState(false);
-  const [authRequestData, setAuthRequestData] = useState<{key: string, label: string} | null>(null);
+  const [authRequestData, setAuthRequestData] = useState<{ key: string, label: string } | null>(null);
+  const processedIdsRef = React.useRef<Set<string>>(new Set());
 
   const loadData = useCallback(() => {
     const terms = db.queryTenant<PaymentTerm>('paymentTerms', companyId, () => true);
     const cats = db.queryTenant<FinanceCategory>('financeCategories', companyId, () => true);
-    setPaymentTerms(terms.sort((a, b) => (a.name || '').localeCompare(b.name || ''))); 
+    setPaymentTerms(terms.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
     setFinanceCategories(cats.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
   }, [companyId]);
 
@@ -79,9 +82,9 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
 
   useEffect(() => {
     if (!currentUser) return;
-    
-    const approvedToProcess = pendingRequests.filter(r => 
-      r.status === 'APPROVED' && r.requested_by_id === currentUser.id
+
+    const approvedToProcess = pendingRequests.filter(r =>
+      r.status === 'APPROVED' && r.requested_by_id === currentUser.id && !processedIdsRef.current.has(r.id)
     );
 
     if (approvedToProcess.length > 0) {
@@ -89,10 +92,11 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
         let needsRefresh = false;
         for (const req of approvedToProcess) {
           try {
+            processedIdsRef.current.add(req.id);
             if (req.action_key === 'EXCLUIR_PRAZO_COMERCIAL') {
               const id = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
               if (id) { await db.delete('paymentTerms', id); needsRefresh = true; }
-            } 
+            }
             else if (req.action_key === 'EXCLUIR_CATEGORIA_FINANCEIRA') {
               const id = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
               if (id) { await db.delete('financeCategories', id); needsRefresh = true; }
@@ -107,20 +111,20 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
               const dataRaw = req.action_label.split('JSON: ')[1]?.trim();
               if (id && dataRaw) { await db.update('financeCategories', id, JSON.parse(dataRaw)); needsRefresh = true; }
             }
-            
+
             await db.update('authorization_requests' as any, req.id, { status: 'PROCESSED' } as any);
           } catch (err) {
             console.error("Erro ao processar liberação remota:", err);
           }
         }
-        
+
         if (needsRefresh) {
           loadData();
           refreshData();
           refreshRequests();
         }
       };
-      
+
       processAll();
     }
   }, [pendingRequests, currentUser, loadData, refreshData, refreshRequests]);
@@ -134,19 +138,24 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
         let hasChanges = false;
         Object.keys(termFormData).forEach(k => {
           const val = (termFormData as any)[k];
+          // Procura o valor original tentando tanto a chave exata quanto a versão camelCase/snakeCase
           const snakeKey = k.replace(/([A-Z])/g, "_$1").toLowerCase();
-          const orig = (original as any)[k] !== undefined ? (original as any)[k] : (original as any)[snakeKey];
-          if (val !== orig) { delta[k] = val; hasChanges = true; }
+          const camelKey = k.replace(/(_\w)/g, m => m[1].toUpperCase());
+
+          const origVal = (original as any)[k] !== undefined ? (original as any)[k] :
+            ((original as any)[snakeKey] !== undefined ? (original as any)[snakeKey] : (original as any)[camelKey]);
+
+          if (val !== origVal) { delta[k] = val; hasChanges = true; }
         });
         if (!hasChanges) return setShowTermModal(false);
-        setAuthRequestData({ 
-          key: 'EDITAR_PRAZO_COMERCIAL', 
-          label: `OP: EDIÇÃO DE PRAZO | ID: #${editingId.slice(-5)} | CTX: FINANCEIRO ESTRUTURAL | DET: Alteração das condições de vencimento e parcelamento do prazo ${original.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingId} | JSON: ${JSON.stringify(delta)}` 
+        setAuthRequestData({
+          key: 'EDITAR_PRAZO_COMERCIAL',
+          label: `OP: EDIÇÃO DE PRAZO | ID: #${editingId.slice(-5)} | CTX: FINANCEIRO ESTRUTURAL | DET: Alteração das condições de vencimento e parcelamento do prazo ${original.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingId} | JSON: ${JSON.stringify(delta)}`
         });
         setIsRequestAuthModalOpen(true); setShowTermModal(false);
       }
     } else {
-      await db.insert('paymentTerms', { ...termFormData, companyId }); 
+      await db.insert('paymentTerms', { ...termFormData, companyId });
       loadData(); refreshData(); setShowTermModal(false);
     }
   };
@@ -161,25 +170,29 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
         Object.keys(categoryFormData).forEach(k => {
           const val = (categoryFormData as any)[k];
           const snakeKey = k.replace(/([A-Z])/g, "_$1").toLowerCase();
-          const orig = (original as any)[k] !== undefined ? (original as any)[k] : (original as any)[snakeKey];
-          if (val !== orig) { delta[k] = val; hasChanges = true; }
+          const camelKey = k.replace(/(_\w)/g, m => m[1].toUpperCase());
+
+          const origVal = (original as any)[k] !== undefined ? (original as any)[k] :
+            ((original as any)[snakeKey] !== undefined ? (original as any)[snakeKey] : (original as any)[camelKey]);
+
+          if (val !== origVal) { delta[k] = val; hasChanges = true; }
         });
         if (!hasChanges) return setShowCategoryModal(false);
-        setAuthRequestData({ 
-          key: 'EDITAR_CATEGORIA_FINANCEIRA', 
-          label: `OP: EDIÇÃO DE CATEGORIA | ID: #${editingCategoryId.slice(-5)} | CTX: PLANO DE CONTAS | DET: Alteração na classificação e finalidade da categoria ${original.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingCategoryId} | JSON: ${JSON.stringify(delta)}` 
+        setAuthRequestData({
+          key: 'EDITAR_CATEGORIA_FINANCEIRA',
+          label: `OP: EDIÇÃO DE CATEGORIA | ID: #${editingCategoryId.slice(-5)} | CTX: PLANO DE CONTAS | DET: Alteração na classificação e finalidade da categoria ${original.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingCategoryId} | JSON: ${JSON.stringify(delta)}`
         });
         setIsRequestAuthModalOpen(true); setShowCategoryModal(false);
       }
     } else {
-      await db.insert('financeCategories', { ...categoryFormData, companyId, is_default: false }); 
+      await db.insert('financeCategories', { ...categoryFormData, companyId, is_default: false });
       loadData(); refreshData(); setShowCategoryModal(false);
     }
   };
 
   return (
     <div className="space-y-12 animate-in fade-in pb-10">
-      
+
       {/* SEÇÃO: PRAZOS COMERCIAIS */}
       {(mode === 'full' || mode === 'terms_only') && (
         <div className="space-y-6">
@@ -188,12 +201,12 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
               <CreditCard className="text-brand-success" size={20} />
               <h3 className="text-sm font-black uppercase tracking-widest text-slate-400">Prazos e Condições</h3>
             </div>
-            <button onClick={() => { 
-              setEditingId(null); 
-              setTermFormData({ name: '', days: 0, installments: 1, type: 'fixed', show_in_sale: true, show_in_purchase: true, show_in_settle: false, show_in_bank_manual: false, show_in_pdv_manual: false, show_in_manual_pdv: false, show_in_cashier_close: false, show_in_opening: false }); 
-              setShowTermModal(true); 
+            <button onClick={() => {
+              setEditingId(null);
+              setTermFormData({ name: '', days: 0, installments: 1, type: 'fixed', show_in_sale: true, show_in_purchase: true, show_in_settle: false, show_in_bank_manual: false, show_in_pdv_manual: false, show_in_manual_pdv: false, show_in_cashier_close: false, show_in_opening: false });
+              setShowTermModal(true);
             }} className="bg-brand-success text-white py-3 px-6 rounded-xl shadow-lg active:scale-95 transition-all hover:bg-brand-success/90 flex items-center gap-2 font-black text-[10px] uppercase tracking-widest">
-              <Plus size={18}/>
+              <Plus size={18} />
               <span>Novo Prazo</span>
             </button>
           </div>
@@ -209,29 +222,30 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
                 </div>
                 {!(term.isDefault || term.is_default) && (
                   <div className="flex gap-2">
-                    <button onClick={() => { 
-                        setEditingId(term.id); 
-                        const isManualPdv = term.show_in_pdv_manual || (term as any).showInPdvManual || term.show_in_manual_pdv || (term as any).showInManualPdv || false;
-                        setTermFormData({
-                            name: term.name, days: term.days, installments: term.installments, type: term.type as any,
-                            show_in_sale: term.show_in_sale ?? (term as any).showInSale ?? true,
-                            show_in_purchase: term.show_in_purchase ?? (term as any).showInPurchase ?? true,
-                            show_in_settle: term.show_in_settle ?? (term as any).showInSettle ?? false,
-                            show_in_bank_manual: term.show_in_bank_manual ?? (term as any).showInBankManual ?? false,
-                            show_in_pdv_manual: isManualPdv,
-                            show_in_manual_pdv: isManualPdv,
-                            show_in_cashier_close: term.show_in_cashier_close ?? (term as any).showInCashierClose ?? false,
-                            show_in_opening: term.show_in_opening ?? (term as any).showInOpening ?? false
-                        }); 
-                        setShowTermModal(true); 
-                    }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white"><Edit2 size={16}/></button>
-                    <button onClick={() => { 
-                      setAuthRequestData({ 
-                        key: 'EXCLUIR_PRAZO_COMERCIAL', 
-                        label: `OP: EXCLUSÃO DE PRAZO | ID: #${term.id.slice(-5)} | CTX: FINANCEIRO ESTRUTURAL | DET: Desativação permanente do prazo comercial ${term.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${term.id}` 
-                      }); 
-                      setIsRequestAuthModalOpen(true); 
-                    }} className="p-2.5 bg-brand-error/10 text-brand-error rounded-lg hover:bg-brand-error/20"><Trash2 size={16}/></button>
+                    <button onClick={() => {
+                      setEditingId(term.id);
+                      const isManualPdv = term.show_in_pdv_manual || (term as any).showInPdvManual || term.show_in_manual_pdv || (term as any).showInManualPdv || false;
+                      setTermFormData({
+                        name: term.name, days: term.days, installments: term.installments, type: term.type as any,
+                        show_in_sale: term.show_in_sale ?? (term as any).showInSale ?? true,
+                        show_in_purchase: term.show_in_purchase ?? (term as any).showInPurchase ?? true,
+                        show_in_settle: term.show_in_settle ?? (term as any).showInSettle ?? false,
+                        show_in_bank_manual: term.show_in_bank_manual ?? (term as any).showInBankManual ?? false,
+                        show_in_pdv_manual: isManualPdv,
+                        show_in_manual_pdv: isManualPdv,
+                        show_in_cashier_close: term.show_in_cashier_close ?? (term as any).showInCashierClose ?? false,
+                        show_in_opening: term.show_in_opening ?? (term as any).showInOpening ?? false,
+                        show_in_title_launch: term.show_in_title_launch ?? (term as any).showInTitleLaunch ?? false
+                      });
+                      setShowTermModal(true);
+                    }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white"><Edit2 size={16} /></button>
+                    <button onClick={() => {
+                      setAuthRequestData({
+                        key: 'EXCLUIR_PRAZO_COMERCIAL',
+                        label: `OP: EXCLUSÃO DE PRAZO | ID: #${term.id.slice(-5)} | CTX: FINANCEIRO ESTRUTURAL | DET: Desativação permanente do prazo comercial ${term.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${term.id}`
+                      });
+                      setIsRequestAuthModalOpen(true);
+                    }} className="p-2.5 bg-brand-error/10 text-brand-error rounded-lg hover:bg-brand-error/20"><Trash2 size={16} /></button>
                   </div>
                 )}
               </div>
@@ -248,12 +262,12 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
               <Tag className="text-blue-400" size={20} />
               <h3 className="text-sm font-black uppercase tracking-widest text-slate-400">Categorias e Fluxos</h3>
             </div>
-            <button onClick={() => { 
-              setEditingCategoryId(null); 
-              setCategoryFormData({ name: '', type: 'both', showInSales: true, showInPurchases: true, showInLiquidation: true, show_in_bank_manual: true, show_in_pdv_manual: true }); 
-              setShowCategoryModal(true); 
+            <button onClick={() => {
+              setEditingCategoryId(null);
+              setCategoryFormData({ name: '', type: 'both', showInSales: true, showInPurchases: true, showInLiquidation: true, show_in_bank_manual: true, show_in_pdv_manual: true });
+              setShowCategoryModal(true);
             }} className="bg-blue-600 text-white py-3 px-6 rounded-xl shadow-lg active:scale-95 transition-all hover:bg-blue-500 flex items-center gap-2 font-black text-[10px] uppercase tracking-widest">
-              <Plus size={18}/>
+              <Plus size={18} />
               <span>Nova Categoria</span>
             </button>
           </div>
@@ -272,26 +286,27 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
                 </div>
                 {!(cat.isDefault || cat.is_default) && (
                   <div className="flex gap-2">
-                    <button onClick={() => { 
-                        setEditingCategoryId(cat.id); 
-                        setCategoryFormData({
-                            name: cat.name,
-                            type: cat.type as any,
-                            showInSales: cat.show_in_sales ?? (cat as any).showInSales ?? true,
-                            showInPurchases: cat.show_in_purchases ?? (cat as any).showInPurchases ?? true,
-                            showInLiquidation: cat.show_in_liquidation ?? (cat as any).showInLiquidation ?? true,
-                            show_in_bank_manual: cat.show_in_bank_manual ?? (cat as any).showInBankManual ?? true,
-                            show_in_pdv_manual: cat.show_in_pdv_manual ?? (cat as any).showInPdvManual ?? true
-                        }); 
-                        setShowCategoryModal(true); 
-                    }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white"><Edit2 size={16}/></button>
-                    <button onClick={() => { 
-                      setAuthRequestData({ 
-                        key: 'EXCLUIR_CATEGORIA_FINANCEIRA', 
-                        label: `OP: EXCLUSÃO DE CATEGORIA | ID: #${cat.id.slice(-5)} | CTX: PLANO DE CONTAS | DET: Remoção definitiva da categoria ${cat.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${cat.id}` 
-                      }); 
-                      setIsRequestAuthModalOpen(true); 
-                    }} className="p-2.5 bg-brand-error/10 text-brand-error rounded-lg hover:bg-brand-error/20"><Trash2 size={16}/></button>
+                    <button onClick={() => {
+                      setEditingCategoryId(cat.id);
+                      setCategoryFormData({
+                        name: cat.name,
+                        type: cat.type as any,
+                        showInSales: cat.show_in_sales ?? (cat as any).showInSales ?? true,
+                        showInPurchases: cat.show_in_purchases ?? (cat as any).showInPurchases ?? true,
+                        showInLiquidation: cat.show_in_liquidation ?? (cat as any).showInLiquidation ?? true,
+                        show_in_bank_manual: cat.show_in_bank_manual ?? (cat as any).showInBankManual ?? true,
+                        show_in_pdv_manual: cat.show_in_pdv_manual ?? (cat as any).showInPdvManual ?? true,
+                        show_in_title_launch: cat.show_in_title_launch ?? (cat as any).showInTitleLaunch ?? true
+                      });
+                      setShowCategoryModal(true);
+                    }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white"><Edit2 size={16} /></button>
+                    <button onClick={() => {
+                      setAuthRequestData({
+                        key: 'EXCLUIR_CATEGORIA_FINANCEIRA',
+                        label: `OP: EXCLUSÃO DE CATEGORIA | ID: #${cat.id.slice(-5)} | CTX: PLANO DE CONTAS | DET: Remoção definitiva da categoria ${cat.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${cat.id}`
+                      });
+                      setIsRequestAuthModalOpen(true);
+                    }} className="p-2.5 bg-brand-error/10 text-brand-error rounded-lg hover:bg-brand-error/20"><Trash2 size={16} /></button>
                   </div>
                 )}
               </div>
@@ -311,19 +326,19 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
             <form onSubmit={handleSaveTerm} className="p-8 space-y-6">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nome da Condição</label>
-                <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success" value={termFormData.name} onChange={e => setTermFormData({...termFormData, name: e.target.value.toUpperCase()})} placeholder="EX: BOLETO 30 DIAS" />
+                <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success" value={termFormData.name} onChange={e => setTermFormData({ ...termFormData, name: e.target.value.toUpperCase() })} placeholder="EX: BOLETO 30 DIAS" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Dias p/ Vencimento</label>
-                  <input type="number" required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success" value={termFormData.days} onChange={e => setTermFormData({...termFormData, days: parseInt(e.target.value)})} />
+                  <input type="number" required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success" value={termFormData.days} onChange={e => setTermFormData({ ...termFormData, days: parseInt(e.target.value) })} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Parcelas</label>
-                  <input type="number" required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success" value={termFormData.installments} onChange={e => setTermFormData({...termFormData, installments: parseInt(e.target.value)})} />
+                  <input type="number" required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success" value={termFormData.installments} onChange={e => setTermFormData({ ...termFormData, installments: parseInt(e.target.value) })} />
                 </div>
               </div>
-              
+
               <div className="space-y-4">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] border-b border-slate-800 pb-2">Contextos de Uso (Ativar nos módulos)</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -331,21 +346,21 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
                     { key: 'show_in_sale', label: 'Vendas' }, { key: 'show_in_purchase', label: 'Compras' },
                     { key: 'show_in_settle', label: 'Baixas Financeiras' }, { key: 'show_in_bank_manual', label: 'Extrato Bancário' },
                     { key: 'show_in_pdv_manual', label: 'Manual PDV' }, { key: 'show_in_cashier_close', label: 'Fechar Caixa' },
-                    { key: 'show_in_opening', label: 'Abertura Caixa' }
+                    { key: 'show_in_opening', label: 'Abertura Caixa' }, { key: 'show_in_title_launch', label: 'Lançar Título' }
                   ].map(ctx => (
                     <label key={ctx.key} className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
-                      <input 
-                        type="checkbox" 
-                        className="w-4 h-4 accent-brand-success" 
-                        checked={(termFormData as any)[ctx.key]} 
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-brand-success"
+                        checked={(termFormData as any)[ctx.key]}
                         onChange={e => {
                           const isChecked = e.target.checked;
                           if (ctx.key === 'show_in_pdv_manual') {
-                            setTermFormData({...termFormData, show_in_pdv_manual: isChecked, show_in_manual_pdv: isChecked});
+                            setTermFormData({ ...termFormData, show_in_pdv_manual: isChecked, show_in_manual_pdv: isChecked });
                           } else {
-                            setTermFormData({...termFormData, [ctx.key]: isChecked});
+                            setTermFormData({ ...termFormData, [ctx.key]: isChecked });
                           }
-                        }} 
+                        }}
                       />
                       <span className="text-[9px] font-black uppercase text-slate-400">{ctx.label}</span>
                     </label>
@@ -372,17 +387,17 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
             <form onSubmit={handleSaveCategory} className="p-8 space-y-6">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nome da Categoria</label>
-                <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-blue-500" value={categoryFormData.name} onChange={e => setCategoryFormData({...categoryFormData, name: e.target.value.toUpperCase()})} placeholder="EX: ALUGUEL, FRETE, ENERGIA" />
+                <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-blue-500" value={categoryFormData.name} onChange={e => setCategoryFormData({ ...categoryFormData, name: e.target.value.toUpperCase() })} placeholder="EX: ALUGUEL, FRETE, ENERGIA" />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tipo de Movimentação</label>
-                <select className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-blue-500" value={categoryFormData.type} onChange={e => setCategoryFormData({...categoryFormData, type: e.target.value as any})}>
+                <select className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-blue-500" value={categoryFormData.type} onChange={e => setCategoryFormData({ ...categoryFormData, type: e.target.value as any })}>
                   <option value="both">ENTRADAS E SAÍDAS</option>
                   <option value="in">APENAS ENTRADAS (+)</option>
                   <option value="out">APENAS SAÍDAS (-)</option>
                 </select>
               </div>
-              
+
               <div className="space-y-4">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Habilitar Contextos</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -390,7 +405,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
                     { key: 'showInSales', label: 'Vendas' }, { key: 'showInPurchases', label: 'Compras' }, { key: 'showInLiquidation', label: 'Liquidações' }
                   ].map(ctx => (
                     <label key={ctx.key} className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
-                      <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={(categoryFormData as any)[ctx.key]} onChange={e => setCategoryFormData({...categoryFormData, [ctx.key]: e.target.checked})} />
+                      <input type="checkbox" className="w-4 h-4 accent-blue-500" checked={(categoryFormData as any)[ctx.key]} onChange={e => setCategoryFormData({ ...categoryFormData, [ctx.key]: e.target.checked })} />
                       <span className="text-[9px] font-black uppercase text-slate-400">{ctx.label}</span>
                     </label>
                   ))}
@@ -399,17 +414,21 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
 
               <div className="space-y-4 pt-4 border-t border-slate-800">
                 <p className="text-[10px] font-black text-brand-warning uppercase tracking-widest border-b border-slate-800 pb-2 flex items-center gap-2">
-                   <ShieldAlert size={12}/> Classificação de Lançamento Manual
+                  <ShieldAlert size={12} /> Classificação de Lançamento Manual
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                   <label className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
-                      <input type="checkbox" className="w-4 h-4 accent-brand-warning" checked={categoryFormData.show_in_bank_manual} onChange={e => setCategoryFormData({...categoryFormData, show_in_bank_manual: e.target.checked})} />
-                      <span className="text-[9px] font-black uppercase text-slate-400">FINANCEIRO (BANCO)</span>
-                    </label>
-                    <label className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
-                      <input type="checkbox" className="w-4 h-4 accent-brand-warning" checked={categoryFormData.show_in_pdv_manual} onChange={e => setCategoryFormData({...categoryFormData, show_in_pdv_manual: e.target.checked})} />
-                      <span className="text-[9px] font-black uppercase text-slate-400">TERMINAL PDV</span>
-                    </label>
+                  <label className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
+                    <input type="checkbox" className="w-4 h-4 accent-brand-warning" checked={categoryFormData.show_in_bank_manual} onChange={e => setCategoryFormData({ ...categoryFormData, show_in_bank_manual: e.target.checked })} />
+                    <span className="text-[9px] font-black uppercase text-slate-400">FINANCEIRO (BANCO)</span>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
+                    <input type="checkbox" className="w-4 h-4 accent-brand-warning" checked={categoryFormData.show_in_pdv_manual} onChange={e => setCategoryFormData({ ...categoryFormData, show_in_pdv_manual: e.target.checked })} />
+                    <span className="text-[9px] font-black uppercase text-slate-400">TERMINAL PDV</span>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition-all">
+                    <input type="checkbox" className="w-4 h-4 accent-brand-warning" checked={(categoryFormData as any).show_in_title_launch} onChange={e => setCategoryFormData({ ...categoryFormData, show_in_title_launch: e.target.checked })} />
+                    <span className="text-[9px] font-black uppercase text-slate-400">LANÇAR TÍTULO (MANUAL)</span>
+                  </label>
                 </div>
               </div>
 

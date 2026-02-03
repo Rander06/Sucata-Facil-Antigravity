@@ -218,7 +218,7 @@ Valor envolvido: ${val}`;
 
   const filteredFinancials = useMemo(() => {
     return financials.filter(f => {
-      const fDate = (f.created_at || '').substring(0, 10);
+      const fDate = getBRDateOnly(f.created_at || '');
       const matchDate = fDate >= dateStart && fDate <= dateEnd;
       const partner = partners.find(p => p.id === f.parceiro_id);
       const matchNatureza = !filters.natureza || (f.natureza || '').toUpperCase().includes(filters.natureza.toUpperCase());
@@ -337,7 +337,7 @@ Valor envolvido: ${val}`;
 
   const formatDate = (iso: string | undefined) => {
     if (!iso) return '---';
-    try { const cleanDate = iso.substring(0, 10); const [year, month, day] = cleanDate.split('-'); return `${day}/${month}/${year}`; } catch { return '---'; }
+    return formatBRDate(iso, 'dd/MM/yyyy');
   };
 
   const formatTime = (iso: string | undefined) => {
@@ -579,7 +579,7 @@ Valor envolvido: ${val}`;
                             <th className="px-4 py-5 w-[300px]">Identificação</th>
                             <th className="px-4 py-5 w-[180px]">Meio/Prazo</th>
                             <th className="px-4 py-5 text-right w-[150px]">Valor Bruto</th>
-                            <th className="px-4 py-5 w-[180px]">Membro</th>
+                            <th className="px-4 py-5 w-[150px]">Operador</th>
                             <th className="px-4 py-5 text-center w-[120px]">Status</th>
                             <th className="px-4 py-5 text-center w-[100px]">Transação</th>
                           </tr>

@@ -34,6 +34,16 @@ const getBrNow = () => {
   return new Date().toISOString();
 };
 
+const getBrToday = () => {
+  // Retorna YYYY-MM-DD no timezone de Brasília
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+};
+
 const TABLE_MAP: Record<string, string> = {
   users: 'profiles',
   profiles: 'profiles',
@@ -85,6 +95,7 @@ const NOMENCLATURE_MAP: Record<string, string> = {
   showInSales: 'show_in_sales',
   showInPurchases: 'show_in_purchases',
   showInLiquidation: 'show_in_liquidation',
+  showInTitleLaunch: 'show_in_title_launch',
   isDefault: 'is_default',
   dueDate: 'due_date',
   liquidationDate: 'liquidation_date',
@@ -136,8 +147,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   cashierSessions: ['id', 'company_id', 'user_id', 'user_name', 'type', 'status', 'opening_balance', 'closing_balance', 'expected_balance', 'auditoria_corrigida', 'difference', 'opening_time', 'closing_time', 'reconciled_at', 'reconciled_by_id', 'reconciled_by_name', 'physical_breakdown', 'reconciled_breakdown', 'created_at', 'updated_at'],
   walletTransactions: ['id', 'company_id', 'user_id', 'id_original', 'categoria', 'parceiro', 'payment_term_id', 'descricao', 'valor_entrada', 'valor_saida', 'saldo_real', 'status', 'operador_id', 'operador_name', 'created_at', 'updated_at'],
   partners: ['id', 'company_id', 'name', 'type', 'document', 'phone', 'created_at'],
-  paymentTerms: ['id', 'uuid', 'company_id', 'user_id', 'name', 'days', 'installments', 'type', 'show_in_sale', 'show_in_purchase', 'show_in_settle', 'show_in_bank_manual', 'show_in_pdv_manual', 'show_in_manual_pdv', 'show_in_cashier_close', 'show_in_opening', 'is_default', 'created_at', 'updated_at'],
-  financeCategories: ['id', 'company_id', 'user_id', 'name', 'type', 'is_default', 'show_in_sales', 'show_in_purchases', 'show_in_liquidation', 'show_in_bank_manual', 'show_in_pdv_manual', 'created_at', 'updated_at'],
+  paymentTerms: ['id', 'uuid', 'company_id', 'user_id', 'name', 'days', 'installments', 'type', 'show_in_sale', 'show_in_purchase', 'show_in_settle', 'show_in_bank_manual', 'show_in_pdv_manual', 'show_in_manual_pdv', 'show_in_cashier_close', 'show_in_opening', 'show_in_title_launch', 'is_default', 'created_at', 'updated_at'],
+  financeCategories: ['id', 'company_id', 'user_id', 'name', 'type', 'is_default', 'show_in_sales', 'show_in_purchases', 'show_in_liquidation', 'show_in_bank_manual', 'show_in_pdv_manual', 'show_in_title_launch', 'created_at', 'updated_at'],
   banks: ['id', 'company_id', 'user_id', 'name', 'code', 'agency', 'account', 'status', 'is_default', 'created_at', 'updated_at'],
   logs: ['id', 'company_id', 'user_id', 'user_name', 'action', 'details', 'created_at'],
   invites: ['id', 'company_id', 'user_id', 'code', 'name', 'email', 'profile', 'permissions', 'status', 'created_by', 'created_at', 'updated_at'],
@@ -218,7 +229,7 @@ const prepareForCloud = (obj: any, tableKey: string) => {
 
 export const db = {
   getNowISO: getBrNow,
-  getToday: () => getBrNow().split('T')[0],
+  getToday: getBrToday,
   normalize: applyRedundancy,
 
   getCloudClient: () => {
@@ -487,7 +498,7 @@ export const db = {
         const isEntry = ['vendas', 'suprimento', 'entrada', 'pagamento', 'sell'].includes(String(r.tipo).toLowerCase());
         const termId = r.paymentTermId || r.payment_term_id;
         const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
-        const isDinheiro = (term && term.name.toUpperCase().includes('DINHEIRO')) || (!termId && !term);
+        const isDinheiro = (term && (term.name || '').toUpperCase().includes('DINHEIRO')) || (!termId && !term);
         if (isDinheiro) {
           if (isEntry) { if (r.status === 'paid') total += r.valor; } else { total -= r.valor; }
         }
@@ -503,7 +514,7 @@ export const db = {
       const isEntry = ['vendas', 'suprimento', 'entrada', 'pagamento', 'sell'].includes(String(r.tipo).toLowerCase());
       const termId = r.paymentTermId || r.payment_term_id;
       const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
-      const isCheque = (term && term.name.toUpperCase().includes('CHEQUE'));
+      const isCheque = (term && (term.name || '').toUpperCase().includes('CHEQUE'));
       let match = isPhysicalCheck ? isCheque : ((termId === itemId || (term && term.uuid === itemId)) || (catName && r.categoria === catName));
       if (match) {
         if (flowType === 'ENTRADA' && isEntry) total += r.valor;

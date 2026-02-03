@@ -218,6 +218,8 @@ export interface PaymentTerm {
   show_in_cashier_close?: boolean;
   showInOpening?: boolean;
   show_in_opening?: boolean;
+  showInTitleLaunch?: boolean;
+  show_in_title_launch?: boolean;
   isDefault?: boolean;
   is_default?: boolean;
   createdAt: string;
@@ -240,6 +242,7 @@ export interface FinanceCategory {
   show_in_liquidation?: boolean;
   show_in_bank_manual?: boolean; // Contexto Financeiro
   show_in_pdv_manual?: boolean;  // Contexto PDV
+  show_in_title_launch?: boolean; // Contexto Lançamento Títulos
   created_at?: string;
 }
 

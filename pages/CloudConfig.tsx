@@ -71,7 +71,22 @@ BEGIN
     END LOOP;
 END $$;
 
-NOTIFY pgrst, 'reload schema';`;
+NOTIFY pgrst, 'reload schema';
+END $$;
+
+-- PARTE 4: UPDATE SCHEMA (ADD NEW COLUMNS)
+-- Adiciona coluna para contexto de lançamento de títulos (v4.15)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='payment_terms' AND column_name='show_in_title_launch') THEN
+        ALTER TABLE public.payment_terms ADD COLUMN show_in_title_launch BOOLEAN DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='finance_categories' AND column_name='show_in_title_launch') THEN
+        ALTER TABLE public.finance_categories ADD COLUMN show_in_title_launch BOOLEAN DEFAULT TRUE;
+    END IF;
+END $$;
+`;
 
   useEffect(() => {
     const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
