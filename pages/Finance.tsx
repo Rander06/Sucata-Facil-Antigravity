@@ -212,7 +212,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mx-1">
             {paymentTerms.map(term => (
-              <div key={term.id} className="enterprise-card p-6 border-slate-800 flex justify-between items-center group bg-slate-900/30 hover:border-brand-success transition-all">
+              <div key={term.id} className="enterprise-card p-6 border-slate-800 flex justify-between items-center group hover:border-brand-success transition-all">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="font-black text-slate-200 uppercase tracking-tight">{term.name}</p>
@@ -273,7 +273,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mx-1">
             {financeCategories.map(cat => (
-              <div key={cat.id} className="enterprise-card p-6 border-slate-800 flex justify-between items-center group bg-slate-900/30 hover:border-blue-500 transition-all">
+              <div key={cat.id} className="enterprise-card p-6 border-slate-800 flex justify-between items-center group hover:border-blue-500 transition-all">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="font-black text-slate-200 uppercase tracking-tight">{cat.name}</p>

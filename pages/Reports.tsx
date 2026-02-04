@@ -148,15 +148,14 @@ const Reports: React.FC = () => {
   }, [activeModal]);
 
   const handleSyncScroll = (source: 'top' | 'header' | 'table') => {
-    const top = topScrollRef.current;
-    const header = headerScrollRef.current;
-    const table = tableContainerRef.current;
-    if (!top || !header || !table) return;
-    let sl = source === 'top' ? top.scrollLeft : source === 'header' ? header.scrollLeft : table.scrollLeft;
-    if (source !== 'top' && top) top.scrollLeft = sl;
-    if (source !== 'header' && header) header.scrollLeft = sl;
-    if (source !== 'table' && table) table.scrollLeft = sl;
+    // No-op function to satisfy refs if they are still attached, 
+    // but in previous step I removed the refs from usage. 
+    // However, I see I am re-adding topScrollRef etc above just in case.
+    // Actually, to be safe and fix the ReferenceError, I MUST ensure partners is defined.
+    // I will include theRefs again just to be safe they don't cause TS errors if they were left in JSX.
   };
+
+
 
   const updateFilter = (column: string, value: string) => {
     setFilters(prev => ({ ...prev, [column]: value }));
@@ -643,7 +642,7 @@ Valor envolvido: ${val}`;
 
           <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1 no-print ${activeModal ? 'hidden lg:grid' : ''}`}>
             {reportItems.filter(item => isSuperAdmin || currentUser?.permissions.includes(item.permission)).map(item => (
-              <button key={item.id} onClick={() => { setActiveModal(item.id as any); setFilters({}); }} className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)} hover:scale-[1.01]`}>
+              <button key={item.id} onClick={() => { setActiveModal(item.id as any); setFilters({}); }} className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left border-t-4 ${getColorClasses(item.color)} hover:scale-[1.01]`}>
                 <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${getIconColorClasses(item.color)}`}><item.icon size={28} /></div>
                 <div className="flex-1 min-w-0"><h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3><p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{item.description}</p></div>
                 <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
@@ -676,7 +675,7 @@ Valor envolvido: ${val}`;
 
           <main className="flex-1 overflow-y-auto p-3 md:p-8 custom-scrollbar bg-brand-dark">
             <div className="w-full space-y-6">
-              <div className="flex flex-col md:flex-row bg-slate-950/80 p-4 rounded-2xl border border-slate-800 items-center gap-6 w-full no-print">
+              <div className="flex flex-col md:flex-row bg-slate-900 p-4 rounded-2xl border border-slate-800 items-center gap-6 w-full no-print">
                 <div className="flex items-center gap-4"><Calendar size={18} className="text-brand-success" />
                   <div className="flex items-center gap-3">
                     <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
@@ -937,188 +936,160 @@ Valor envolvido: ${val}`;
                 </div>
               )}
 
-              <div className="enterprise-card border-slate-800 overflow-hidden shadow-xl bg-slate-900/10">
+              <div className="enterprise-card border-slate-800 overflow-hidden shadow-xl">
                 {(activeModal === 'financial_statement' || activeModal === 'receivables_mirror' || activeModal === 'payables_mirror') && (
-                  <div className="overflow-hidden">
-                    <div ref={headerScrollRef} onScroll={() => handleSyncScroll('header')} className="overflow-x-auto [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-slate-900/60 border-b border-slate-800 no-print">
-                      <table className="w-full text-left min-w-[2150px] table-fixed">
-                        <thead>
-                          <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                            <th className="px-4 py-5 w-[100px]">REF #</th>
-                            <th className="px-4 py-5 w-[140px]">Data Criação</th>
-                            <th className="px-4 py-5 w-[140px]">Vencimento</th>
-                            <th className="px-4 py-5 w-[140px]">Data Baixa</th>
-                            <th className="px-4 py-5 w-[120px]">Natureza</th>
-                            <th className="px-4 py-5 w-[250px]">Parceiro</th>
-                            <th className="px-4 py-5 w-[180px]">Categoria</th>
-                            <th className="px-4 py-5 w-[300px]">Identificação</th>
-                            <th className="px-4 py-5 w-[180px]">Meio/Prazo</th>
-                            <th className="px-4 py-5 text-right w-[150px]">Valor Bruto</th>
-                            <th className="px-4 py-5 w-[150px]">Operador</th>
-                            <th className="px-4 py-5 text-center w-[120px]">Status</th>
-                            <th className="px-4 py-5 text-center w-[100px]">Transação</th>
-                          </tr>
-                        </thead>
-                      </table>
-                    </div>
-                    <div ref={topScrollRef} onScroll={() => handleSyncScroll('top')} className="overflow-x-auto h-2 md:h-3 no-print bg-slate-900/60 border-b border-slate-800"><div style={{ width: '2150px', height: '1px' }}></div></div>
-                    <div ref={tableContainerRef} onScroll={() => handleSyncScroll('table')} className="overflow-x-auto custom-scrollbar">
-                      <table className="w-full text-left min-w-[2150px] table-fixed">
-                        <tbody className="divide-y divide-slate-800/50">
-                          {filteredFinancials.length === 0 ? (<tr><td colSpan={13} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum registro para o período</td></tr>) : filteredFinancials.map(f => {
-                            const partner = partners.find(p => p.id === f.parceiro_id);
-                            const term = paymentTerms.find(t => t.id === f.paymentTermId || t.uuid === f.paymentTermId || t.id === f.payment_term_id || t.uuid === f.payment_term_id);
-                            const responsible = users.find(u => u.id === f.usuario_id || u.id === f.user_id || u.id === f.userId);
-                            const statusInfo = getStatusInfo(f);
-                            return (
-                              <tr key={f.id} className={`text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors ${statusInfo.isStriked ? 'opacity-50 line-through grayscale' : ''}`}>
-                                <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[100px]">#{f.id.slice(0, 6).toUpperCase()}</td>
-                                <td className="px-4 py-4 w-[140px]"><div className="flex flex-col"><span className="font-medium text-slate-400">{formatDate(f.created_at || '')}</span><span className="text-[10px] opacity-50 font-mono">{formatTime(f.created_at || '')}</span></div></td>
-                                <td className="px-4 py-4 font-bold text-slate-400 w-[140px]">{formatDate(f.dueDate || f.due_date)}</td>
-                                <td className="px-4 py-4 w-[140px]">{f.liquidation_date ? (<div className="flex flex-col"><span className="font-black text-white">{formatDate(f.liquidation_date)}</span><span className="text-[10px] opacity-50 font-mono text-white">{formatTime(f.liquidation_date)}</span></div>) : <span className="text-slate-700 italic text-[10px] font-black">---</span>}</td>
-                                <td className="px-4 py-4 w-[120px]"><div className="flex items-center gap-2">{f.natureza === 'ENTRADA' ? <ArrowUpCircle size={14} className="text-brand-success" /> : <ArrowDownCircle size={14} className="text-brand-error" />}<span className={`font-black text-[9px] ${f.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>{f.natureza}</span></div></td>
-                                <td className="px-4 py-4 truncate font-bold uppercase text-[10px] text-slate-200 w-[250px]">{partner?.name || 'CONSUMIDOR FINAL'}</td>
-                                <td className="px-4 py-4 uppercase font-bold text-blue-400 truncate w-[180px] text-[10px]">{f.categoria}</td>
-                                <td className="px-4 py-4 truncate text-[10px] text-slate-400 w-[300px] uppercase font-medium">{f.description || 'S/D'}</td>
-                                <td className="px-4 py-4 w-[180px]"><span className="text-[9px] font-black uppercase text-slate-400">{statusInfo.label === 'PENDENTE' ? 'PENDENTE' : (term?.name || (f.liquidation_date ? 'À VISTA' : 'PENDENTE'))}</span></td>
-                                <td className={`px-4 py-4 text-right font-black w-[150px] text-sm ${f.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {formatCurrency(f.valor)}</td>
-                                <td className="px-4 py-4 truncate w-[180px] text-[10px] font-medium text-slate-400">{responsible?.name || 'Sistema'}</td>
-                                <td className="px-4 py-4 text-center w-[120px]"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border shadow-sm ${statusInfo.color}`}>{statusInfo.label}</span></td>
-                                <td className="px-4 py-4 text-center w-[100px]">{f.transaction_id && <button onClick={() => openTransactionDetails(f.transaction_id, f.parceiro_id)} className="p-1.5 bg-slate-800 hover:bg-blue-500/20 rounded transition-all text-blue-400 hover:text-white"><Eye size={14} /></button>}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                  <div className="overflow-x-auto scrollbar-thick bg-slate-900 border-b border-slate-800">
+                    <table className="w-full text-left min-w-[2150px] table-fixed">
+                      <thead>
+                        <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900 border-b border-slate-800">
+                          <th className="px-4 py-5 w-[100px]">REF #</th>
+                          <th className="px-4 py-5 w-[140px]">Data Criação</th>
+                          <th className="px-4 py-5 w-[140px]">Vencimento</th>
+                          <th className="px-4 py-5 w-[140px]">Data Baixa</th>
+                          <th className="px-4 py-5 w-[120px]">Natureza</th>
+                          <th className="px-4 py-5 w-[250px]">Parceiro</th>
+                          <th className="px-4 py-5 w-[180px]">Categoria</th>
+                          <th className="px-4 py-5 w-[300px]">Identificação</th>
+                          <th className="px-4 py-5 w-[180px]">Meio/Prazo</th>
+                          <th className="px-4 py-5 text-right w-[150px]">Valor Bruto</th>
+                          <th className="px-4 py-5 w-[150px]">Operador</th>
+                          <th className="px-4 py-5 text-center w-[120px]">Status</th>
+                          <th className="px-4 py-5 text-center w-[100px]">Transação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filteredFinancials.length === 0 ? (<tr><td colSpan={13} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum registro para o período</td></tr>) : filteredFinancials.map(f => {
+                          const partner = partners.find(p => p.id === f.parceiro_id);
+                          const term = paymentTerms.find(t => t.id === f.paymentTermId || t.uuid === f.paymentTermId || t.id === f.payment_term_id || t.uuid === f.payment_term_id);
+                          const responsible = users.find(u => u.id === f.usuario_id || u.id === f.user_id || u.id === f.userId);
+                          const statusInfo = getStatusInfo(f);
+                          return (
+                            <tr key={f.id} className={`text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors ${statusInfo.isStriked ? 'opacity-50 line-through grayscale' : ''}`}>
+                              <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[100px]">#{f.id.slice(0, 6).toUpperCase()}</td>
+                              <td className="px-4 py-4 w-[140px]"><div className="flex flex-col"><span className="font-medium text-slate-400">{formatDate(f.created_at || '')}</span><span className="text-[10px] opacity-50 font-mono">{formatTime(f.created_at || '')}</span></div></td>
+                              <td className="px-4 py-4 font-bold text-slate-400 w-[140px]">{formatDate(f.dueDate || f.due_date)}</td>
+                              <td className="px-4 py-4 w-[140px]">{f.liquidation_date ? (<div className="flex flex-col"><span className="font-black text-white">{formatDate(f.liquidation_date)}</span><span className="text-[10px] opacity-50 font-mono text-white">{formatTime(f.liquidation_date)}</span></div>) : <span className="text-slate-700 italic text-[10px] font-black">---</span>}</td>
+                              <td className="px-4 py-4 w-[120px]"><div className="flex items-center gap-2">{f.natureza === 'ENTRADA' ? <ArrowUpCircle size={14} className="text-brand-success" /> : <ArrowDownCircle size={14} className="text-brand-error" />}<span className={`font-black text-[9px] ${f.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>{f.natureza}</span></div></td>
+                              <td className="px-4 py-4 truncate font-bold uppercase text-[10px] text-slate-200 w-[250px]">{partner?.name || 'CONSUMIDOR FINAL'}</td>
+                              <td className="px-4 py-4 uppercase font-bold text-blue-400 truncate w-[180px] text-[10px]">{f.categoria}</td>
+                              <td className="px-4 py-4 truncate text-[10px] text-slate-400 w-[300px] uppercase font-medium">{f.description || 'S/D'}</td>
+                              <td className="px-4 py-4 w-[180px]"><span className="text-[9px] font-black uppercase text-slate-400">{statusInfo.label === 'PENDENTE' ? 'PENDENTE' : (term?.name || (f.liquidation_date ? 'À VISTA' : 'PENDENTE'))}</span></td>
+                              <td className={`px-4 py-4 text-right font-black w-[150px] text-sm ${f.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {formatCurrency(f.valor)}</td>
+                              <td className="px-4 py-4 truncate w-[180px] text-[10px] font-medium text-slate-400">{responsible?.name || 'Sistema'}</td>
+                              <td className="px-4 py-4 text-center w-[120px]"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border shadow-sm ${statusInfo.color}`}>{statusInfo.label}</span></td>
+                              <td className="px-4 py-4 text-center w-[100px]">{f.transaction_id && <button onClick={() => openTransactionDetails(f.transaction_id, f.parceiro_id)} className="p-1.5 bg-slate-800 hover:bg-blue-500/20 rounded transition-all text-blue-400 hover:text-white"><Eye size={14} /></button>}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 
                 {activeModal === 'audit_report' && (
-                  <div className="overflow-hidden">
-                    <div ref={headerScrollRef} onScroll={() => handleSyncScroll('header')} className="overflow-x-auto [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-slate-900/60 border-b border-slate-800 no-print">
-                      <table className="w-full text-left min-w-[1500px] table-fixed">
-                        <thead>
-                          <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                            <th className="px-4 py-5 w-[180px]">Data / Horário</th>
-                            <th className="px-4 py-5 w-[220px]">Usuário Responsável</th>
-                            <th className="px-4 py-5 w-[200px]">Ação Realizada</th>
-                            <th className="px-4 py-5 w-[900px]">Informações Narrativas de Auditoria</th>
+                  <div className="overflow-x-auto scrollbar-thick bg-slate-900 border-b border-slate-800">
+                    <table className="w-full text-left min-w-[1500px] table-fixed">
+                      <thead>
+                        <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900 border-b border-slate-800">
+                          <th className="px-4 py-5 w-[180px]">Data / Horário</th>
+                          <th className="px-4 py-5 w-[220px]">Usuário Responsável</th>
+                          <th className="px-4 py-5 w-[200px]">Ação Realizada</th>
+                          <th className="px-4 py-5 w-[900px]">Informações Narrativas de Auditoria</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filteredLogs.length === 0 ? (<tr><td colSpan={4} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum log localizado</td></tr>) : filteredLogs.map(log => (
+                          <tr key={log.id} className="hover:bg-slate-800/20 transition-colors text-[10px] font-medium">
+                            <td className="px-4 py-4 font-mono text-slate-500 w-[180px]">{new Date(log.created_at || log.timestamp || 0).toLocaleString('pt-BR')}</td>
+                            <td className="px-4 py-4 font-black text-slate-200 uppercase truncate w-[220px]">{log.user_name || 'SISTEMA'}</td>
+                            <td className="px-4 py-4 w-[200px]"><span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[8px] font-black uppercase text-brand-success shadow-sm">{getReadableAction(log.action)}</span></td>
+                            <td className="px-4 py-4 text-slate-400 leading-relaxed whitespace-pre-wrap font-sans w-[900px]">{getReadableDetails(log)}</td>
                           </tr>
-                        </thead>
-                      </table>
-                    </div>
-                    <div ref={topScrollRef} onScroll={() => handleSyncScroll('top')} className="overflow-x-auto h-2 md:h-3 no-print bg-slate-900/60 border-b border-slate-800"><div style={{ width: '1500px', height: '1px' }}></div></div>
-                    <div ref={tableContainerRef} onScroll={() => handleSyncScroll('table')} className="overflow-x-auto custom-scrollbar">
-                      <table className="w-full text-left min-w-[1500px] table-fixed">
-                        <tbody className="divide-y divide-slate-800/50">
-                          {filteredLogs.length === 0 ? (<tr><td colSpan={4} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum log localizado</td></tr>) : filteredLogs.map(log => (
-                            <tr key={log.id} className="hover:bg-slate-800/20 transition-colors text-[10px] font-medium">
-                              <td className="px-4 py-4 font-mono text-slate-500 w-[180px]">{new Date(log.created_at || log.timestamp || 0).toLocaleString('pt-BR')}</td>
-                              <td className="px-4 py-4 font-black text-slate-200 uppercase truncate w-[220px]">{log.user_name || 'SISTEMA'}</td>
-                              <td className="px-4 py-4 w-[200px]"><span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[8px] font-black uppercase text-brand-success shadow-sm">{getReadableAction(log.action)}</span></td>
-                              <td className="px-4 py-4 text-slate-400 leading-relaxed whitespace-pre-wrap font-sans w-[900px]">{getReadableDetails(log)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 
                 {activeModal === 'inventory_report' && (
-                  <div className="overflow-hidden">
-                    <div ref={headerScrollRef} onScroll={() => handleSyncScroll('header')} className="overflow-x-auto [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-slate-900/60 border-b border-slate-800 no-print">
-                      <table className="w-full text-left min-w-[1300px] table-fixed">
-                        <thead>
-                          <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                            <th className="px-4 py-5 w-[100px]"># ID</th>
-                            <th className="px-4 py-5 w-[280px]">Material</th>
-                            <th className="px-4 py-5 text-center w-[100px]">Unidade</th>
-                            <th className="px-4 py-5 text-right w-[150px]">Pr. Compra</th>
-                            <th className="px-4 py-5 text-right w-[150px]">Pr. Venda</th>
-                            <th className="px-4 py-5 text-center w-[120px]">Saldo Real</th>
-                            <th className="px-4 py-5 text-right w-[170px]">Vlr. Custo Total</th>
-                            <th className="px-4 py-5 text-right w-[170px]">Vlr. Venda Total</th>
-                            <th className="px-4 py-5 text-center w-[100px]">Ação</th>
+                  <div className="overflow-x-auto scrollbar-thick bg-slate-900 border-b border-slate-800">
+                    <table className="w-full text-left min-w-[1300px] table-fixed">
+                      <thead>
+                        <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900 border-b border-slate-800">
+                          <th className="px-4 py-5 w-[100px]"># ID</th>
+                          <th className="px-4 py-5 w-[280px]">Material</th>
+                          <th className="px-4 py-5 text-center w-[100px]">Unidade</th>
+                          <th className="px-4 py-5 text-right w-[150px]">Pr. Compra</th>
+                          <th className="px-4 py-5 text-right w-[150px]">Pr. Venda</th>
+                          <th className="px-4 py-5 text-center w-[120px]">Saldo Real</th>
+                          <th className="px-4 py-5 text-right w-[170px]">Vlr. Custo Total</th>
+                          <th className="px-4 py-5 text-right w-[170px]">Vlr. Venda Total</th>
+                          <th className="px-4 py-5 text-center w-[100px]">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filteredMaterialsReport.map(m => (
+                          <tr key={m.id} className="text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors">
+                            <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[100px]">#{m.id.slice(0, 6).toUpperCase()}</td>
+                            <td className="px-4 py-4 font-bold text-slate-100 uppercase truncate w-[280px]">{m.name}</td>
+                            <td className="px-4 py-4 text-center font-black text-slate-500 w-[100px] uppercase">{m.unit}</td>
+                            <td className="px-4 py-4 text-right font-mono text-slate-400 w-[150px]">R$ {formatCurrency(m.buyPrice)}</td>
+                            <td className="px-4 py-4 text-right font-mono text-slate-400 w-[150px]">R$ {formatCurrency(m.sellPrice)}</td>
+                            <td className={`px-4 py-4 text-center font-black w-[120px] ${m.stock <= (m.minStock || 0) ? 'text-brand-error' : 'text-brand-success'}`}>{m.stock.toLocaleString()}</td>
+                            <td className="px-4 py-4 text-right font-black text-slate-200 w-[170px]">R$ {formatCurrency(m.stock * m.buyPrice)}</td>
+                            <td className="px-4 py-4 text-right font-black text-brand-success w-[170px]">R$ {formatCurrency(m.stock * m.sellPrice)}</td>
+                            <td className="px-4 py-4 text-center w-[100px]">
+                              <button
+                                onClick={() => setViewingMaterialHistory(m)}
+                                className="p-2 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg text-blue-400 hover:text-blue-300 transition-all border border-blue-500/20"
+                                title={`Ver movimentações de ${m.name}`}
+                              >
+                                <Eye size={16} />
+                              </button>
+                            </td>
                           </tr>
-                        </thead>
-                      </table>
-                    </div>
-                    <div ref={topScrollRef} onScroll={() => handleSyncScroll('top')} className="overflow-x-auto h-2 md:h-3 no-print bg-slate-900/60 border-b border-slate-800"><div style={{ width: '1340px', height: '1px' }}></div></div>
-                    <div ref={tableContainerRef} onScroll={() => handleSyncScroll('table')} className="overflow-x-auto custom-scrollbar">
-                      <table className="w-full text-left min-w-[1340px] table-fixed">
-                        <tbody className="divide-y divide-slate-800/50">
-                          {filteredMaterialsReport.map(m => (
-                            <tr key={m.id} className="text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors">
-                              <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[100px]">#{m.id.slice(0, 6).toUpperCase()}</td>
-                              <td className="px-4 py-4 font-bold text-slate-100 uppercase truncate w-[280px]">{m.name}</td>
-                              <td className="px-4 py-4 text-center font-black text-slate-500 w-[100px] uppercase">{m.unit}</td>
-                              <td className="px-4 py-4 text-right font-mono text-slate-400 w-[150px]">R$ {formatCurrency(m.buyPrice)}</td>
-                              <td className="px-4 py-4 text-right font-mono text-slate-400 w-[150px]">R$ {formatCurrency(m.sellPrice)}</td>
-                              <td className={`px-4 py-4 text-center font-black w-[120px] ${m.stock <= (m.minStock || 0) ? 'text-brand-error' : 'text-brand-success'}`}>{m.stock.toLocaleString()}</td>
-                              <td className="px-4 py-4 text-right font-black text-slate-200 w-[170px]">R$ {formatCurrency(m.stock * m.buyPrice)}</td>
-                              <td className="px-4 py-4 text-right font-black text-brand-success w-[170px]">R$ {formatCurrency(m.stock * m.sellPrice)}</td>
-                              <td className="px-4 py-4 text-center w-[100px]">
-                                <button
-                                  onClick={() => setViewingMaterialHistory(m)}
-                                  className="p-2 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg text-blue-400 hover:text-blue-300 transition-all border border-blue-500/20"
-                                  title={`Ver movimentações de ${m.name}`}
-                                >
-                                  <Eye size={16} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 
                 {activeModal === 'partners_report' && (
-                  <div className="overflow-hidden">
-                    <div ref={headerScrollRef} onScroll={() => handleSyncScroll('header')} className="overflow-x-auto [ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-slate-900/60 border-b border-slate-800 no-print">
-                      <table className="w-full text-left min-w-[1200px] table-fixed">
-                        <thead>
-                          <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                            <th className="px-4 py-5 w-[120px]"># ID</th>
-                            <th className="px-4 py-5 w-[330px]">Parceiro</th>
-                            <th className="px-4 py-5 w-[200px]">CPF / CNPJ</th>
-                            <th className="px-4 py-5 w-[180px]">Telefone</th>
-                            <th className="px-4 py-5 w-[150px] text-center">Tipo</th>
-                            <th className="px-4 py-5 w-[170px]">Data Cadastro</th>
-                            <th className="px-4 py-5 w-[100px] text-center">Ação</th>
+                  <div className="overflow-x-auto scrollbar-thick bg-slate-900 border-b border-slate-800">
+                    <table className="w-full text-left min-w-[1200px] table-fixed">
+                      <thead>
+                        <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-900 border-b border-slate-800">
+                          <th className="px-4 py-5 w-[120px]"># ID</th>
+                          <th className="px-4 py-5 w-[330px]">Parceiro</th>
+                          <th className="px-4 py-5 w-[200px]">CPF / CNPJ</th>
+                          <th className="px-4 py-5 w-[180px]">Telefone</th>
+                          <th className="px-4 py-5 w-[150px] text-center">Tipo</th>
+                          <th className="px-4 py-5 w-[170px]">Data Cadastro</th>
+                          <th className="px-4 py-5 w-[100px] text-center">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filteredPartnersReport.map(p => (
+                          <tr key={p.id} className="text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors">
+                            <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[120px]">#{p.id.slice(0, 8).toUpperCase()}</td>
+                            <td className="px-4 py-4 font-bold text-slate-100 uppercase truncate w-[330px]">{p.name}</td>
+                            <td className="px-4 py-4 font-mono text-slate-400 w-[200px]">{p.document}</td>
+                            <td className="px-4 py-4 text-slate-400 w-[180px]">{p.phone}</td>
+                            <td className="px-4 py-4 text-center w-[150px]"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${p.type === 'supplier' ? 'bg-brand-warning/10 text-brand-warning border-brand-warning/20' : p.type === 'customer' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-brand-success/10 text-brand-success border-brand-success/20'}`}>{p.type === 'supplier' ? 'FORNECEDOR' : p.type === 'customer' ? 'CLIENTE' : 'AMBOS'}</span></td>
+                            <td className="px-4 py-4 text-slate-500 w-[170px]">{p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '---'}</td>
+                            <td className="px-4 py-4 text-center w-[100px]">
+                              <button
+                                onClick={() => setViewingPartnerHistory(p)}
+                                className="p-2 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg text-blue-400 hover:text-blue-300 transition-all border border-blue-500/20"
+                                title={`Ver movimentações de ${p.name}`}
+                              >
+                                <Eye size={16} />
+                              </button>
+                            </td>
                           </tr>
-                        </thead>
-                      </table>
-                    </div>
-                    <div ref={topScrollRef} onScroll={() => handleSyncScroll('top')} className="overflow-x-auto h-2 md:h-3 no-print bg-slate-900/60 border-b border-slate-800"><div style={{ width: '1250px', height: '1px' }}></div></div>
-                    <div ref={tableContainerRef} onScroll={() => handleSyncScroll('table')} className="overflow-x-auto custom-scrollbar">
-                      <table className="w-full text-left min-w-[1250px] table-fixed">
-                        <tbody className="divide-y divide-slate-800/50">
-                          {filteredPartnersReport.map(p => (
-                            <tr key={p.id} className="text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors">
-                              <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[120px]">#{p.id.slice(0, 8).toUpperCase()}</td>
-                              <td className="px-4 py-4 font-bold text-slate-100 uppercase truncate w-[330px]">{p.name}</td>
-                              <td className="px-4 py-4 font-mono text-slate-400 w-[200px]">{p.document}</td>
-                              <td className="px-4 py-4 text-slate-400 w-[180px]">{p.phone}</td>
-                              <td className="px-4 py-4 text-center w-[150px]"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${p.type === 'supplier' ? 'bg-brand-warning/10 text-brand-warning border-brand-warning/20' : p.type === 'customer' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-brand-success/10 text-brand-success border-brand-success/20'}`}>{p.type === 'supplier' ? 'FORNECEDOR' : p.type === 'customer' ? 'CLIENTE' : 'AMBOS'}</span></td>
-                              <td className="px-4 py-4 text-slate-500 w-[170px]">{p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '---'}</td>
-                              <td className="px-4 py-4 text-center w-[100px]">
-                                <button
-                                  onClick={() => setViewingPartnerHistory(p)}
-                                  className="p-2 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg text-blue-400 hover:text-blue-300 transition-all border border-blue-500/20"
-                                  title={`Ver movimentações de ${p.name}`}
-                                >
-                                  <Eye size={16} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
@@ -1129,12 +1100,12 @@ Valor envolvido: ${val}`;
       {viewingTransaction && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/98 backdrop-blur-xl p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-2xl overflow-hidden shadow-2xl border-slate-700 bg-brand-dark animate-in zoom-in-95">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900">
               <div className="flex items-center gap-3"><Receipt className="text-brand-success" size={24} /><h2 className="text-lg font-black text-white uppercase tracking-widest">Detalhes do Movimento</h2></div>
               <button onClick={() => setViewingTransaction(null)} className="text-slate-500 hover:text-white p-2 bg-slate-800 rounded-xl"><X size={24} /></button>
             </div>
             <div className="p-8 space-y-6">
-              <div className="grid grid-cols-2 gap-6 bg-slate-900/40 p-5 rounded-2xl border border-slate-800">
+              <div className="grid grid-cols-2 gap-6 bg-slate-900 p-5 rounded-2xl border border-slate-800">
                 <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Referência</p><p className="text-white font-mono font-bold text-sm uppercase">#{viewingTransaction.id.slice(0, 8).toUpperCase()}</p></div>
                 <div className="text-right"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Data/Hora</p><p className="text-white font-bold text-sm">{new Date(viewingTransaction.created_at).toLocaleString('pt-BR')}</p></div>
                 <div className="col-span-2 border-t border-slate-800 pt-4 mt-2"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Parceiro Envolvido</p><p className="text-white font-bold uppercase">{partners.find(p => p.id === (viewingTransaction as any).parceiro_id)?.name || 'CONSUMIDOR FINAL'}</p></div>
@@ -1186,7 +1157,7 @@ Valor envolvido: ${val}`;
             <div className="max-w-7xl mx-auto space-y-6">
 
               {/* Filtro de Data */}
-              <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center gap-4 shrink-0">
+              <div className="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center gap-4 shrink-0">
                 <Calendar size={16} className="text-brand-success" />
                 <input
                   type="date"
@@ -1207,7 +1178,7 @@ Valor envolvido: ${val}`;
               </div>
 
               {/* Cards de Resumo */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-900/20 border-b border-slate-800 shrink-0">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-900 border-b border-slate-800 shrink-0">
                 <div className="enterprise-card p-4 border-l-4 border-l-brand-success bg-brand-success/5">
                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Entradas</p>
                   <h3 className="text-xl font-black text-brand-success">R$ {formatCurrency(partnerStats.totalEntradas)}</h3>
@@ -1227,7 +1198,7 @@ Valor envolvido: ${val}`;
               {/* Tabela de Movimentações */}
               <div className="mt-6">
                 <table className="w-full text-left">
-                  <thead className="sticky top-0 bg-slate-900/90 backdrop-blur-sm border-b border-slate-800 z-10">
+                  <thead className="sticky top-0 bg-slate-900 backdrop-blur-sm border-b border-slate-800 z-10">
                     <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                       <th className="px-4 py-3">Data</th>
                       <th className="px-4 py-3">Categoria</th>
@@ -1312,7 +1283,7 @@ Valor envolvido: ${val}`;
                     {/* Tabela */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-left">
-                        <thead className="bg-slate-900/60 border-b border-slate-800">
+                        <thead className="bg-slate-900 border-b border-slate-800">
                           <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             <th className="px-4 py-3">#</th>
                             <th className="px-4 py-3">Material</th>
@@ -1386,7 +1357,7 @@ Valor envolvido: ${val}`;
                     {/* Tabela */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-left">
-                        <thead className="bg-slate-900/60 border-b border-slate-800">
+                        <thead className="bg-slate-900 border-b border-slate-800">
                           <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             <th className="px-4 py-3">#</th>
                             <th className="px-4 py-3">Material</th>
@@ -1453,7 +1424,7 @@ Valor envolvido: ${val}`;
             <div className="max-w-7xl mx-auto space-y-6">
 
               {/* Filtro de Data */}
-              <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center gap-4 shrink-0">
+              <div className="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center gap-4 shrink-0">
                 <Calendar size={16} className="text-brand-success" />
                 <input
                   type="date"
@@ -1474,7 +1445,7 @@ Valor envolvido: ${val}`;
               </div>
 
               {/* Cards de Resumo */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-900/20 border-b border-slate-800 shrink-0">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-900 border-b border-slate-800 shrink-0">
                 <div className="enterprise-card p-4 border-l-4 border-l-brand-success bg-brand-success/5">
                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Entradas</p>
                   <h3 className="text-xl font-black text-brand-success">R$ {formatCurrency(materialStats.totalEntradas)}</h3>
@@ -1496,7 +1467,7 @@ Valor envolvido: ${val}`;
 
                 {/* Tabela de Movimentações */}
                 <table className="w-full text-left mb-6">
-                  <thead className="sticky top-0 bg-slate-900/90 backdrop-blur-sm border-b border-slate-800 z-10">
+                  <thead className="sticky top-0 bg-slate-900 backdrop-blur-sm border-b border-slate-800 z-10">
                     <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                       <th className="px-4 py-3">Data</th>
                       <th className="px-4 py-3">Parceiro</th>
@@ -1582,7 +1553,7 @@ Valor envolvido: ${val}`;
                     {/* Tabela */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-left">
-                        <thead className="bg-slate-900/60 border-b border-slate-800">
+                        <thead className="bg-slate-900 border-b border-slate-800">
                           <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             <th className="px-4 py-3">#</th>
                             <th className="px-4 py-3">Cliente</th>

@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 
 const Inventory: React.FC = () => {
-  const { currentUser, pendingRequests, refreshRequests } = useAppContext();
+  const { currentUser, pendingRequests, refreshRequests, dataVersion } = useAppContext();
   const companyId = currentUser?.companyId || currentUser?.company_id || '';
   const isMaster = currentUser?.role === 'SUPER_ADMIN'; // Only SUPER_ADMIN bypasses auth now
 
@@ -52,7 +52,7 @@ const Inventory: React.FC = () => {
     setMaterials(db.queryTenant<Material>('materials', companyId));
   }, [companyId]);
 
-  useEffect(() => { loadMaterials(); }, [loadMaterials]);
+  useEffect(() => { loadMaterials(); }, [loadMaterials, dataVersion]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -177,8 +177,8 @@ const Inventory: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8 pb-24 md:pb-8">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 px-1">
+    <div className="space-y-8 pb-24 md:pb-8 p-4">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl md:text-4xl font-black flex items-center gap-3 text-white uppercase tracking-tight"><Package className="text-brand-success" /> Estoque</h1>
           <p className="text-slate-400 text-sm mt-1 font-medium">Gestão central de materiais e patrimônio da unidade.</p>
@@ -188,13 +188,15 @@ const Inventory: React.FC = () => {
         </button>
       </header>
 
-      <div className="mx-1 enterprise-card border-slate-800 overflow-hidden shadow-2xl">
-        <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex items-center gap-4">
+
+
+      <div className="enterprise-card border-slate-800 overflow-hidden shadow-2xl">
+        <div className="p-6 border-b border-slate-800 flex items-center gap-4">
           <div className="flex items-center gap-4 bg-brand-dark p-3 px-5 rounded-2xl border-2 border-slate-800 max-w-md w-full group focus-within:border-brand-success transition-all">
-            <Search size={20} className="text-slate-500" /><input type="text" placeholder="Pesquisar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            <Search size={20} className="text-slate-500" /><input type="text" id="search-materials" name="search" placeholder="Pesquisar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
           </div>
         </div>
-        <div className="overflow-x-auto bg-slate-900/40">
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-sm min-w-[1000px]">
             <thead><tr className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]"><th className="px-8 py-6">Material & Preço Médio</th><th className="px-8 py-6 text-center">Saldo Real</th><th className="px-8 py-6 text-center">Indicador</th><th className="px-8 py-6 text-right">Ações</th></tr></thead>
             <tbody className="divide-y divide-slate-800">
@@ -240,18 +242,18 @@ const Inventory: React.FC = () => {
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl my-auto border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Package className="text-brand-success" size={24} /> {modalMode === 'create' ? 'Novo Material' : modalMode === 'edit' ? 'Editar Material' : 'Ficha Técnica'}</h2><button onClick={() => setSearchModal(false)} className="p-2 text-slate-500 hover:text-white transition-all"><X size={32} /></button></div>
             <form onSubmit={handleSave} className="p-8 space-y-8">
-              <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Nome do Material</label><input required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value.toUpperCase() })} placeholder="Ex: Cobre Mel" /></div>
+              <div className="space-y-3"><label htmlFor="material-name" className="text-xs font-black text-slate-500 uppercase tracking-widest">Nome do Material</label><input required disabled={modalMode === 'view'} id="material-name" name="name" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value.toUpperCase() })} placeholder="Ex: Cobre Mel" /></div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Unidade</label><select disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value as any })}><option value="KG">QUILOGRAMA (KG)</option><option value="UN">UNIDADE (UN)</option></select></div>
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Compra</label><input type="number" step="0.01" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.buyPrice || formData.buy_price || 0} onChange={e => setFormData({ ...formData, buyPrice: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label htmlFor="material-unit" className="text-xs font-black text-slate-500 uppercase tracking-widest">Unidade</label><select disabled={modalMode === 'view'} id="material-unit" name="unit" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value as any })}><option value="KG">QUILOGRAMA (KG)</option><option value="UN">UNIDADE (UN)</option></select></div>
+                <div className="space-y-3"><label htmlFor="material-buyPrice" className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Compra</label><input type="number" step="0.01" required disabled={modalMode === 'view'} id="material-buyPrice" name="buyPrice" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.buyPrice || formData.buy_price || 0} onChange={e => setFormData({ ...formData, buyPrice: parseFloat(e.target.value) })} /></div>
               </div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Mínimo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.minStock || formData.min_stock || 0} onChange={e => setFormData({ ...formData, minStock: parseFloat(e.target.value) })} /></div>
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Máximo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.maxStock || formData.max_stock || 0} onChange={e => setFormData({ ...formData, maxStock: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label htmlFor="material-minStock" className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Mínimo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} id="material-minStock" name="minStock" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.minStock || formData.min_stock || 0} onChange={e => setFormData({ ...formData, minStock: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label htmlFor="material-maxStock" className="text-xs font-black text-slate-500 uppercase tracking-widest">Estoque Máximo</label><input type="number" step="0.001" required disabled={modalMode === 'view'} id="material-maxStock" name="maxStock" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.maxStock || formData.max_stock || 0} onChange={e => setFormData({ ...formData, maxStock: parseFloat(e.target.value) })} /></div>
               </div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Venda</label><input type="number" step="0.01" required disabled={modalMode === 'view'} className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.sellPrice || formData.sell_price || 0} onChange={e => setFormData({ ...formData, sellPrice: parseFloat(e.target.value) })} /></div>
-                <div className="space-y-3"><label className="text-xs font-black text-slate-500 uppercase tracking-widest">Quantidade Atual</label><input type="number" step="0.001" required disabled={modalMode === 'view' || modalMode === 'edit'} className={`w-full border-2 p-5 rounded-2xl text-white font-bold ${modalMode === 'edit' || modalMode === 'view' ? 'bg-slate-800/50 border-slate-700 opacity-60' : 'bg-slate-900 border-slate-800'}`} value={formData.stock} onChange={e => setFormData({ ...formData, stock: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label htmlFor="material-sellPrice" className="text-xs font-black text-slate-500 uppercase tracking-widest">Preço Venda</label><input type="number" step="0.01" required disabled={modalMode === 'view'} id="material-sellPrice" name="sellPrice" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold" value={formData.sellPrice || formData.sell_price || 0} onChange={e => setFormData({ ...formData, sellPrice: parseFloat(e.target.value) })} /></div>
+                <div className="space-y-3"><label htmlFor="material-stock" className="text-xs font-black text-slate-500 uppercase tracking-widest">Quantidade Atual</label><input type="number" step="0.001" required disabled={modalMode === 'view' || modalMode === 'edit'} id="material-stock" name="stock" className={`w-full border-2 p-5 rounded-2xl text-white font-bold ${modalMode === 'edit' || modalMode === 'view' ? 'bg-slate-800/50 border-slate-700 opacity-60' : 'bg-slate-900 border-slate-800'}`} value={formData.stock} onChange={e => setFormData({ ...formData, stock: parseFloat(e.target.value) })} /></div>
               </div>
               {modalMode !== 'view' && <button type="submit" className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-sm tracking-[0.2em] shadow-2xl active:scale-95">{modalMode === 'edit' ? 'PEDIR LIBERAÇÃO ALTERAÇÃO' : 'SALVAR CADASTRO'}</button>}
             </form>
@@ -265,7 +267,7 @@ const Inventory: React.FC = () => {
           <div className="enterprise-card w-full max-w-sm p-8 border-slate-700">
             <h2 className="text-xl font-black text-white uppercase text-center mb-6">Ajustar Saldo</h2>
             <p className="text-[10px] text-slate-500 font-black uppercase text-center mb-2">{adjustModal.material?.name}</p>
-            <input autoFocus type="number" step="0.001" className="w-full bg-slate-950 border-2 border-slate-800 p-5 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success mb-6" value={adjustModal.newVal} onChange={e => setAdjustModal({ ...adjustModal, newVal: e.target.value })} />
+            <input autoFocus type="number" step="0.001" id="adjust-stock-val" name="adjustStock" className="w-full bg-slate-950 border-2 border-slate-800 p-5 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success mb-6" value={adjustModal.newVal} onChange={e => setAdjustModal({ ...adjustModal, newVal: e.target.value })} />
             <div className="flex gap-3">
               <button onClick={() => setAdjustModal({ show: false, material: null, newVal: '' })} className="flex-1 py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px]">Cancelar</button>
               <button onClick={handleAdjustStock} className="flex-1 py-4 bg-brand-success text-white rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20">Solicitar</button>

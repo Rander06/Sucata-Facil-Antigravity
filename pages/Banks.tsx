@@ -91,10 +91,10 @@ const Banks: React.FC = () => {
         <button onClick={() => { setEditingId(null); setFormData({ name: '', code: '', agency: '', account: '', isDefault: false }); setShowModal(true); }} className="bg-brand-success text-white py-3.5 px-6 rounded-xl shadow-xl font-black flex items-center justify-center gap-3 text-[10px] uppercase tracking-widest transition-all"><Plus size={18} /><span>Cadastrar Banco</span></button>
       </header>
 
-      <div className="enterprise-card overflow-hidden border-slate-800 shadow-2xl bg-slate-900/20 mx-1">
+      <div className="enterprise-card overflow-hidden border-slate-800 shadow-2xl mx-1">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
-            <thead><tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest border-b border-slate-800 bg-slate-900/40"><th className="px-6 py-5">Banco</th><th className="px-6 py-5">Cód</th><th className="px-6 py-5">Agência / Conta</th><th className="px-6 py-5 text-center">Padrão</th><th className="px-6 py-5 text-right">Ações</th></tr></thead>
+            <thead><tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest border-b border-slate-800"><th className="px-6 py-5">Banco</th><th className="px-6 py-5">Cód</th><th className="px-6 py-5">Agência / Conta</th><th className="px-6 py-5 text-center">Padrão</th><th className="px-6 py-5 text-right">Ações</th></tr></thead>
             <tbody className="divide-y divide-slate-800">
               {banks.length === 0 ? (
                 <tr><td colSpan={5} className="py-20 text-center opacity-20 font-black uppercase tracking-widest">Nenhum banco cadastrado</td></tr>
@@ -129,7 +129,7 @@ const Banks: React.FC = () => {
         <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-300">
           <div className="enterprise-card w-full max-md overflow-hidden shadow-2xl border-slate-700 animate-in zoom-in-95 duration-200">
             {/* Modal Header */}
-            <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
               <h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-tight">
                 <Landmark className="text-brand-success" size={24} />
                 {editingId ? 'Ajustar Banco' : 'Novo Banco'}

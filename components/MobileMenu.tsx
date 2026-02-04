@@ -1,6 +1,7 @@
 import React from 'react';
 import { Package, X, LogOut, ShieldAlert } from 'lucide-react';
 import { useAppContext } from '../store/AppContext';
+import CloudStatusWidget from './CloudStatusWidget';
 import { PermissionModule } from '../types';
 
 interface MenuItem {
@@ -20,7 +21,7 @@ interface MobileMenuProps {
 }
 
 const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, onClose, filteredMenu, activePage, setActivePage }) => {
-    const { logout, currentUser } = useAppContext();
+    const { logout, currentUser, isSyncing, performManualSync, isCloudEnabled, isOnline } = useAppContext();
 
     if (!isOpen) return null;
 
@@ -73,20 +74,35 @@ const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, onClose, filteredMenu, 
                     })}
                 </nav>
 
-                <div className="mx-4 mb-4 p-4 bg-slate-900/50 border border-slate-800 rounded-2xl flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-brand-success text-white flex items-center justify-center text-xl font-black shadow-lg">
+                {/* User Profile */}
+                <div className="mt-auto mx-4 mb-2 p-2 bg-slate-900/50 border border-slate-800 rounded-lg flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-md bg-brand-success text-white flex items-center justify-center text-sm font-black shadow-lg">
                         {currentUser?.name?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-black text-white uppercase tracking-tight truncate">{currentUser?.name}</span>
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{currentUser?.profile}</span>
+                        <span className="text-[10px] font-black text-white uppercase tracking-tight truncate">{currentUser?.name}</span>
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{currentUser?.profile}</span>
                     </div>
                 </div>
 
-                <div className="p-4 border-t border-slate-800 mt-auto bg-slate-950/30">
-                    <button onClick={logout} className="w-full flex items-center gap-4 p-4 rounded-xl text-brand-error bg-brand-error/5 hover:bg-brand-error/10 transition-colors">
+                <div className="p-4 border-t border-slate-800 bg-slate-950/30 flex items-center justify-between">
+                    {/* Minimal Cloud Indicator (Click to Sync) */}
+                    <button
+                        onClick={() => performManualSync()}
+                        disabled={isSyncing || !isCloudEnabled || !isOnline}
+                        className={`relative group flex items-center justify-center p-2 rounded-lg transition-all ${(!isCloudEnabled || !isOnline) ? 'opacity-50' : 'active:scale-95'}`}
+                        title={!isOnline ? 'Offline' : (isSyncing ? 'Sincronizando...' : 'Cloud Ativa')}
+                    >
+                        <div className={`w-3.5 h-3.5 rounded-full ${!isOnline ? 'bg-brand-error animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]' : (isSyncing ? 'bg-brand-success animate-ping' : (isCloudEnabled ? 'bg-brand-success shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-slate-600'))}`}></div>
+                    </button>
+
+                    {/* Minimal Logout Button */}
+                    <button
+                        onClick={logout}
+                        className="p-2 text-brand-error bg-brand-error/5 hover:bg-brand-error/10 rounded-lg transition-colors border border-brand-error/10"
+                        title="Sair"
+                    >
                         <LogOut size={20} />
-                        <span className="font-black text-sm uppercase tracking-widest">Sair do Sistema</span>
                     </button>
                 </div>
             </aside>

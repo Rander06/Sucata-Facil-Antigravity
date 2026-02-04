@@ -5,6 +5,7 @@ import { db as dbService } from '../services/dbService';
 import { Material, Partner, Transaction, FinancialRecord, PermissionModule, CashierSession, PaymentTerm, FinanceCategory, User, WalletTransaction, Bank, AuthorizationRequest, UserRole, OperationalProfile, CartItem } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import { authorizationService } from '../services/authorizationService';
+import { generateUUID } from '../utils/uuid';
 import {
   ShoppingCart,
   Search,
@@ -61,6 +62,59 @@ import { formatCurrency } from '../utils/currencyHelper';
 const db = dbService;
 
 // CartItem interface moved to types.ts
+
+interface CartInputProps {
+  id: string;
+  value: number;
+  label: string;
+  type: 'quantity' | 'price';
+  onChange: (val: number) => void;
+}
+
+const CartInput: React.FC<CartInputProps> = ({ id, value, label, type, onChange }) => {
+  const [displayValue, setDisplayValue] = useState(value === 0 ? '' : value.toString());
+
+  useEffect(() => {
+    // Sync external changes (except when user is typing 0.something)
+    const validDisplay = parseFloat(displayValue.replace(',', '.') || '0');
+    if (validDisplay !== value) {
+      setDisplayValue(value === 0 ? '' : value.toString());
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setDisplayValue(newVal);
+
+    // Normalize comma to dot for parsing
+    const normalized = newVal.replace(/,/g, '.');
+    const number = parseFloat(normalized);
+
+    if (!isNaN(number)) {
+      onChange(number);
+    } else if (newVal === '') {
+      onChange(0);
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="text-[8px] uppercase text-slate-600 font-black">{label}</label>
+      <input
+        id={id}
+        name={id}
+        type="text"
+        inputMode="decimal"
+        placeholder={type === 'quantity' ? "Qtd" : "R$"}
+        onFocus={(e) => e.target.select()}
+        className={`w-full bg-slate-950 border ${value === 0 && type === 'quantity' ? 'border-brand-warning animate-pulse' : 'border-slate-800'} p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none transition-colors`}
+        value={displayValue}
+        onChange={handleChange}
+      />
+    </div>
+  );
+};
+
 
 const POS: React.FC = () => {
   const {
@@ -694,15 +748,31 @@ const POS: React.FC = () => {
     if (isOpening) return;
     if (editingRecordId) { setEditOpeningToRequest({ recordId: editingRecordId, value: openingBalanceInput }); setIsRequestEditOpeningAuthModalOpen(true); return; }
 
-    if (!openingBankId) return alert("Selecione o Banco de Origem para o fundo de troco.");
-    if (!openingTermId) return alert("Selecione o Meio de Pagamento.");
+    // STRICT CHECK: Verify if ANY session is already open
+    const openSessions = db.queryTenant<CashierSession>('cashierSessions', companyId, s =>
+      (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open'
+    );
+
+    if (openSessions.length > 0) {
+      alert(`JÁ EXISTE UM CAIXA ABERTO!\n\nVocê já possui um turno ativo (${openSessions[0].type.toUpperCase()}).\nEncerre o turno atual antes de abrir um novo.`);
+      return;
+    }
+
+    // AUTOMATION: Default to CARTEIRA and À VISTA (DINHEIRO)
+    const targetBank = banks.find(b => b.name.toUpperCase() === 'CARTEIRA');
+    // Try openingTerms first, then fallback to allTerms
+    const targetTerm = openingTerms.find(t => t.name.toUpperCase() === 'À VISTA (DINHEIRO)')
+      || allTerms.find(t => t.name.toUpperCase() === 'À VISTA (DINHEIRO)');
+
+    if (!targetBank) return alert("ERRO CRÍTICO: Banco 'CARTEIRA' não encontrado. Configure-o em Bancos.");
+    if (!targetTerm) return alert("ERRO CRÍTICO: Forma de Pagamento 'À VISTA (DINHEIRO)' não encontrada. Configure-a em Termos de Pagamento.");
 
     const valorNum = parseNumericString(openingBalanceInput);
     setIsOpening(true);
     try {
       const now = db.getNowISO();
-      const bank = banks.find(b => b.id === openingBankId);
-      const term = openingTerms.find(t => t.id === openingTermId || t.uuid === openingTermId);
+      const bank = targetBank;
+      const term = targetTerm;
 
       const session = await db.insert<CashierSession>('cashierSessions', {
         companyId,
@@ -727,7 +797,7 @@ const POS: React.FC = () => {
         caixa_id: session.id,
         user_id: currentUser!.id,
         created_at: now,
-        paymentTermId: openingTermId,
+        paymentTermId: term.id || term.uuid || '',
         natureza: 'ENTRADA',
         liquidation_date: now
       });
@@ -741,7 +811,7 @@ const POS: React.FC = () => {
         user_id: currentUser!.id,
         categoria: 'ABERTURA DE CAIXA',
         parceiro: bank?.name || 'BANCO ORIGEM',
-        payment_term_id: openingTermId,
+        payment_term_id: term.id || term.uuid || '',
         forma: term?.name || 'OUTROS',
         descricao: `SAÍDA DE CONTA PARA FUNDO DE TROCO - TURNO ${session.id.slice(0, 6).toUpperCase()}`,
         valor_entrada: 0,
@@ -856,6 +926,12 @@ const POS: React.FC = () => {
 
   const handleCheckout = async () => {
     if (isSubmitting || !activeSession || !currentUser || !selectedPartnerId || cart.length === 0) return;
+
+    if (cart.some(item => item.quantity <= 0)) {
+      alert("ATENÇÃO: Existem itens com quantidade ZERADA no pedido. Por favor, verifique e informe a quantidade correta para prosseguir.");
+      return;
+    }
+
     if (editingRecordId) {
       const financial = historyRecords.find(r => r.id === editingRecordId);
       if (financial?.transaction_id) {
@@ -881,7 +957,7 @@ const POS: React.FC = () => {
         natureza: type === 'buy' ? 'SAIDA' : 'ENTRADA',
         tipo: type === 'buy' ? 'compras' : 'vendas',
         items: cart.map(i => ({
-          id: Math.random().toString(36).substring(7),
+          id: generateUUID(),
           materialId: i.material.id,
           materialName: i.material.name,
           quantity: i.quantity,
@@ -917,7 +993,58 @@ const POS: React.FC = () => {
     } catch (err: any) { alert(err.message); } finally { setIsSubmitting(false); }
   };
 
-  const addToCart = (material: Material) => { if (!activeSession) return; const systemPrice = type === 'buy' ? (material.buyPrice || 0) : (material.sellPrice || 0); setCart(prev => [...prev, { id: Math.random().toString(36).substring(7), material, quantity: 1, unit: material.unit, systemPrice, appliedPrice: systemPrice }]); };
+  const addToCart = (material: Material) => {
+    if (!activeSession) return;
+
+    if (!selectedPartnerId) {
+      setIsPartnerMenuOpen(true);
+      setTimeout(() => {
+        const input = document.getElementById('pos-partnerSearch');
+        if (input) {
+          input.focus();
+          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+      return;
+    }
+
+    // ENFORCEMENT: Must complete current item quantity first
+    if (cart.some(item => item.quantity <= 0)) {
+      alert("Por favor, informe a quantidade do item atual antes de adicionar o próximo.");
+      const zeroItem = cart.find(item => item.quantity <= 0);
+      if (zeroItem) {
+        setTimeout(() => {
+          const input = document.getElementById(`cart-quantity-${zeroItem.id}`);
+          if (input) {
+            input.focus();
+            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+      }
+      return;
+    }
+
+    const newItemId = generateUUID();
+    const systemPrice = type === 'buy' ? (material.buyPrice || 0) : (material.sellPrice || 0);
+
+    setCart(prev => [...prev, {
+      id: newItemId,
+      material,
+      quantity: 0, // Initialize with 0 to force user input
+      unit: material.unit,
+      systemPrice: systemPrice,
+      appliedPrice: systemPrice
+    }]);
+
+    // Auto-focus logic
+    setTimeout(() => {
+      const input = document.getElementById(`cart-quantity-${newItemId}`);
+      if (input) {
+        input.focus();
+        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
 
   const closingMetrics = useMemo(() => {
     if (!activeSession) return { expected: 0, totalFisico: 0, totalEntradasInfo: 0, totalSaidasInfo: 0 };
@@ -942,7 +1069,7 @@ const POS: React.FC = () => {
   }, [activeSession, closingBreakdown, dynamicClosingItems, companyId, financeCategories, refreshKey]);
 
   return (
-    <div className="space-y-6 max-w-full overflow-x-hidden p-1 animate-in fade-in">
+    <div className="space-y-6 max-w-full overflow-x-hidden p-4 animate-in fade-in">
       {editingRecordId && (
         <div className="absolute top-0 left-0 right-0 z-[30] animate-pulse no-print">
           <div className="bg-brand-warning text-black flex items-center justify-center gap-3 py-3 px-4 shadow-[0_4px_20px_rgba(245,158,11,0.5)] border-b-2 border-black/10">
@@ -961,7 +1088,7 @@ const POS: React.FC = () => {
         </div>
       )}
 
-      <header className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 md:gap-6 px-1 no-print bg-slate-900/20 p-4 rounded-2xl border border-slate-800 transition-all ${editingRecordId ? 'mt-14 md:mt-12' : ''}`}>
+      <header className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 md:gap-6 no-print bg-brand-card p-4 rounded-2xl border border-slate-800 transition-all ${editingRecordId ? 'mt-14 md:mt-12' : ''}`}>
         <div className="flex flex-col">
           <h1 className="text-xl md:text-2xl font-black flex items-center gap-2 text-white uppercase tracking-tight">
             <ShoppingCart className="text-brand-success" size={24} /> Terminal PDV
@@ -985,7 +1112,7 @@ const POS: React.FC = () => {
       {activeSession && (
         <div className="flex flex-col lg:flex-row gap-6 no-print">
           <div className="flex-1 space-y-6">
-            <div className="enterprise-card p-4 flex flex-col md:flex-row gap-4 items-center bg-slate-900/50">
+            <div className="enterprise-card p-4 flex flex-col md:flex-row gap-4 items-center">
               <div className="flex bg-brand-dark p-1 rounded-xl border border-slate-800 w-full md:w-auto">
                 {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) && (
                   <button onClick={() => { if (!editingRecordId) { setType('buy'); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
@@ -1094,8 +1221,22 @@ const POS: React.FC = () => {
                     <button onClick={() => setCart(cart.filter(i => i.id !== item.id))} className="absolute top-4 right-4 text-slate-600 hover:text-brand-error transition-colors p-1"><X size={16} /></button>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate max-w-[80%]">{item.material.name}</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1"><label htmlFor={`cart-quantity-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Qtd ({item.unit})</label><input id={`cart-quantity-${item.id}`} name={`cart-quantity-${item.id}`} type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.quantity} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, quantity: parseFloat(e.target.value) || 0 } : i))} /></div>
-                      <div className="space-y-1"><label htmlFor={`cart-price-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Preço Unit.</label><input id={`cart-price-${item.id}`} name={`cart-price-${item.id}`} type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.appliedPrice} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, appliedPrice: parseFloat(e.target.value) || 0 } : i))} /></div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <CartInput
+                          id={`cart-quantity-${item.id}`}
+                          value={item.quantity}
+                          label={`Qtd (${item.unit})`}
+                          type="quantity"
+                          onChange={(val) => setCart(cart.map(i => i.id === item.id ? { ...i, quantity: val } : i))}
+                        />
+                        <CartInput
+                          id={`cart-price-${item.id}`}
+                          value={item.appliedPrice}
+                          label="Preço Unit."
+                          type="price"
+                          onChange={(val) => setCart(cart.map(i => i.id === item.id ? { ...i, appliedPrice: val } : i))}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1135,6 +1276,8 @@ const POS: React.FC = () => {
               <div className="flex items-center gap-4 bg-brand-dark border border-slate-800 rounded-xl px-4 py-2.5 focus-within:border-brand-success transition-all">
                 <Search size={20} className="text-slate-500" />
                 <input
+                  id="bills-search"
+                  name="billsSearch"
                   type="text"
                   autoFocus
                   placeholder="Pesquisar por parceiro ou descrição..."
@@ -1349,24 +1492,7 @@ const POS: React.FC = () => {
                     <input id="opening-balance" name="opening-balance" required autoFocus type="text" placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success transition-all" value={openingBalanceInput} onChange={e => setOpeningBalanceInput(e.target.value)} />
                   </div>
 
-                  {!editingRecordId && (
-                    <div className="grid grid-cols-1 gap-4">
-                      <div className="space-y-1">
-                        <label htmlFor="opening-bank" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block flex items-center gap-2"><Landmark size={12} /> Conta Bancária (Origem)</label>
-                        <select id="opening-bank" name="opening-bank" required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={openingBankId} onChange={e => setOpeningBankId(e.target.value)}>
-                          <option value="">SELECIONE A CONTA...</option>
-                          {banks.map(b => <option key={b.id} value={b.id}>{b.name.toUpperCase()}</option>)}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <label htmlFor="opening-term" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block flex items-center gap-2"><ArrowRightLeft size={12} /> Meio de Pagamento</label>
-                        <select id="opening-term" name="opening-term" required className="w-full bg-slate-900 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={openingTermId} onChange={e => setOpeningTermId(e.target.value)}>
-                          <option value="">SELECIONE A FORMA...</option>
-                          {openingTerms.map(t => <option key={t.id} value={t.uuid || t.id}>{t.name.toUpperCase()}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  )}
+                  {/* Campos de Banco e Forma removidos para automação (Carteira/Dinheiro) */}
                 </div>
 
                 <div className="flex gap-3">
@@ -1444,7 +1570,7 @@ const POS: React.FC = () => {
               </div>
 
               {/* Grid de Campos Categorizados */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-h-[50vh] overflow-y-auto custom-scrollbar pr-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pr-4">
 
                 {/* Coluna 1: FISICO */}
                 <div className="space-y-4">

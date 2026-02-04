@@ -1,6 +1,8 @@
 import { PermissionModule, UserRole, OperationalProfile, User, ActionLog, PaymentTerm, FinanceCategory, CashierSession, FinancialRecord, Backup, WalletTransaction, Bank, AuthorizationRequest } from '../types';
 import { createSupabaseClient } from './supabase';
 
+import { generateUUID } from '../utils/uuid';
+
 const STORAGE_KEY = 'sucata_facil_db';
 
 interface DBState {
@@ -24,8 +26,7 @@ interface DBState {
 let supabaseInstance: any = null;
 
 const generateId = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  return generateUUID();
 };
 
 // Returns current timestamp in UTC (ISO 8601 format)
@@ -259,7 +260,40 @@ export const db = {
         const { data, error } = await client.from(cloudTable).select('*');
         if (!error && data) {
           const normalized = data.map(applyRedundancy);
-          (currentState as any)[tableKey] = normalized;
+
+          if (tableKey === 'users') {
+            // Smart Merge for Users to preserve local Heartbeat timestamps
+            // CRITICAL FIX: Fetch FRESH local state. 'currentState' is a snapshot from start of function (stale).
+            // A heartbeat might have happened while awaiting the network request.
+            const freshState = db.get();
+            const currentUsers = (freshState as any).users || [];
+
+            (currentState as any).users = normalized.map((cloudUser: any) => {
+              const localUser = currentUsers.find((u: any) => u.id === cloudUser.id);
+              if (localUser) {
+                // AGGRESSIVE PRESENCE MERGE:
+                // Trust local 'Heartbeat' timestamps if they are recent (< 5 min), 
+                // preventing the "Offline" flicker when Cloud data is stale or sync lags.
+                const localUpdated = localUser.updated_at ? new Date(localUser.updated_at).getTime() : 0;
+                const cloudUpdated = cloudUser.updated_at ? new Date(cloudUser.updated_at).getTime() : 0;
+
+                const isLocalRecent = (Date.now() - localUpdated) < 300000; // 5 minutes buffer
+
+                if (localUpdated >= cloudUpdated || isLocalRecent) {
+                  return {
+                    ...cloudUser,
+                    updated_at: localUser.updated_at,
+                    last_login: localUser.last_login,
+                    // Also keep last_logout if local is newer
+                    last_logout: (localUser.last_logout && new Date(localUser.last_logout).getTime() > (cloudUser.last_logout ? new Date(cloudUser.last_logout).getTime() : 0)) ? localUser.last_logout : cloudUser.last_logout
+                  };
+                }
+              }
+              return cloudUser;
+            });
+          } else {
+            (currentState as any)[tableKey] = normalized;
+          }
         }
       }
       db.save(currentState);
@@ -522,6 +556,52 @@ export const db = {
       }
     });
     return total;
+  },
+
+  subscribeToChanges: (onUpdate: () => void) => {
+    const client = db.getCloudClient();
+    if (!client) {
+      console.warn('[REALTIME] Client not available');
+      return () => { };
+    }
+
+    // Debounce to avoid multiple triggers for a single batch of updates
+    let debounceTimer: any = null;
+    const debouncedUpdate = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log('[REALTIME] Change detected, syncing...');
+        db.syncFromCloud().then((success) => {
+          if (success) {
+            console.log('[REALTIME] Sync completed, updating UI.');
+            onUpdate();
+          }
+        });
+      }, 1000); // 1 second debounce
+    };
+
+    const tables = ['materials', 'financials', 'transactions', 'partners', 'cashier_sessions', 'authorization_requests'];
+    const channel = client.channel('db_changes_global');
+
+    tables.forEach(table => {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table: table }, (payload) => {
+        console.log(`[REALTIME] Update received for ${table}`, payload);
+        debouncedUpdate();
+      });
+    });
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[REALTIME] Connected to Supabase Realtime ✅');
+      } else {
+        console.log('[REALTIME] Connection status:', status);
+      }
+    });
+
+    return () => {
+      console.log('[REALTIME] Unsubscribing global channel...');
+      client.removeChannel(channel);
+    };
   }
 };
 

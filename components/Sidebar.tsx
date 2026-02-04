@@ -33,7 +33,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     activeNotificationCount,
     setIsAuthModalOpen
 }) => {
-    const { logout, currentUser } = useAppContext();
+    const { logout, currentUser, isSyncing, performManualSync, isCloudEnabled, isOnline } = useAppContext();
 
     return (
         <aside className={`hidden md:flex no-print bg-brand-card border-r border-slate-800 transition-all duration-300 z-50 ${isSidebarOpen ? 'w-64' : 'w-20'} flex-col relative`}>
@@ -100,28 +100,38 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             )}
 
-            <CloudStatusWidget isCollapsed={!isSidebarOpen} />
+            {/* <CloudStatusWidget /> Removed - Integrated into footer */}
 
-            <div className="mx-3 mt-4 p-3 bg-slate-900/50 border border-slate-800 rounded-xl flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg bg-brand-success/10 border border-brand-success/20 flex items-center justify-center text-brand-success font-black ${!isSidebarOpen && 'mx-auto'}`}>
+            <div className="mx-2 mt-2 p-2 bg-slate-900/50 border border-slate-800 rounded-lg flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-md bg-brand-success/10 border border-brand-success/20 flex items-center justify-center text-brand-success font-black text-xs ${!isSidebarOpen && 'mx-auto'}`}>
                     {currentUser?.name?.charAt(0).toUpperCase()}
                 </div>
                 {isSidebarOpen && (
                     <div className="flex flex-col min-w-0">
-                        <span className="text-[11px] font-black text-white uppercase truncate tracking-tight">{currentUser?.name}</span>
-                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{currentUser?.profile}</span>
+                        <span className="text-[10px] font-black text-white uppercase truncate tracking-tight">{currentUser?.name}</span>
+                        <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{currentUser?.profile}</span>
                     </div>
                 )}
             </div>
 
-            <div className="p-4 border-t border-slate-800 mt-auto">
+            <div className={`p-4 border-t border-slate-800 mt-auto flex items-center ${isSidebarOpen ? 'justify-between' : 'justify-center flex-col gap-4'}`}>
+                {/* Minimal Cloud Indicator (Click to Sync) */}
+                <button
+                    onClick={() => performManualSync()}
+                    disabled={isSyncing || !isCloudEnabled || !isOnline}
+                    className={`relative group flex items-center justify-center p-2 rounded-lg transition-all ${(!isCloudEnabled || !isOnline) ? 'opacity-50' : 'hover:bg-slate-800/50'}`}
+                    title={!isOnline ? 'Offline' : (isSyncing ? 'Sincronizando...' : 'Cloud Ativa - Clique para Sincronizar')}
+                >
+                    <div className={`w-3.5 h-3.5 rounded-full ${!isOnline ? 'bg-brand-error animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.5)]' : (isSyncing ? 'bg-brand-success animate-ping' : (isCloudEnabled ? 'bg-brand-success shadow-[0_0_8px_rgba(34,197,94,0.3)]' : 'bg-slate-600'))}`}></div>
+                </button>
+
+                {/* Minimal Logout Button */}
                 <button
                     onClick={logout}
-                    className={`w-full flex items-center gap-4 p-3 rounded-xl text-brand-error hover:bg-brand-error/10 transition-all ${!isSidebarOpen ? 'justify-center px-0' : ''}`}
-                    title={!isSidebarOpen ? 'Sair do Sistema' : undefined}
+                    className="p-2 text-brand-error hover:text-red-400 hover:bg-brand-error/10 rounded-lg transition-all"
+                    title="Sair do Sistema"
                 >
                     <LogOut size={20} />
-                    {isSidebarOpen && <span className="font-bold text-sm">Encerrar Sessão</span>}
                 </button>
             </div>
         </aside>

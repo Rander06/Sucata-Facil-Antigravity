@@ -149,7 +149,7 @@ END $$;
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
         <div className="lg:col-span-3 space-y-8">
-          <div className="enterprise-card p-8 border-slate-800 bg-slate-900/10">
+          <div className="enterprise-card p-8 border-slate-800">
             <form onSubmit={handleSave} className="space-y-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Globe size={12} /> Endpoint Supabase</label>
@@ -199,7 +199,7 @@ END $$;
         </div>
 
         <div className="lg:col-span-2">
-          <div className="enterprise-card p-6 bg-slate-950 border-slate-800 flex flex-col h-full">
+          <div className="enterprise-card p-6 border-slate-800 flex flex-col h-full">
             <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
               <h3 className="text-xs font-black uppercase text-brand-success">SQL Master v4.14</h3>
               <button onClick={handleCopySQL} className="text-[10px] font-black uppercase text-slate-500 hover:text-white flex items-center gap-2">

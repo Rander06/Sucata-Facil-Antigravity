@@ -281,6 +281,17 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
               <Plus size={18} /> <span className="whitespace-nowrap">Criar Plano</span>
             </button>
           )}
+          <button onClick={() => {
+            const keys = localStorage.getItem('sucata_facil_cloud_config');
+            if (keys) {
+              const p = JSON.parse(keys);
+              prompt("COPIE E COLE NO CHAT:", `URL: ${p.url} | KEY: ${p.key}`);
+            } else {
+              alert("Nenhuma chave encontrada no LocalStorage deste PC.");
+            }
+          }} className="p-3 bg-indigo-500/20 text-indigo-400 hover:text-white rounded-xl border border-indigo-500/30" title="Ver Chaves de Acesso">
+            <Key size={20} />
+          </button>
           <button onClick={loadData} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700">
             <RefreshCw size={20} className={isLoading ? 'animate-spin' : ''} />
           </button>

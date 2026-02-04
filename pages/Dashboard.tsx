@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { FinancialRecord, Transaction, Material, PermissionModule } from '../types';
+import { FinancialRecord, Transaction, Material, PermissionModule, User, CashierSession } from '../types';
 import {
   TrendingUp,
   TrendingDown,
@@ -15,7 +15,8 @@ import {
   AlertTriangle,
   Wallet,
   PieChart as PieChartIcon,
-  BarChart3
+  BarChart3,
+  User as UserIcon
 } from 'lucide-react';
 import {
   BarChart,
@@ -52,13 +53,55 @@ const PIE_COLORS = [
 ];
 
 const Dashboard: React.FC = () => {
-  const { currentUser } = useAppContext();
+  const { currentUser, dataVersion } = useAppContext();
   const companyId = currentUser?.companyId || '';
+  const [tick, setTick] = React.useState(0);
+
+  // Force re-render every 10 seconds to update timestamps
+  React.useEffect(() => {
+    const interval = setInterval(() => setTick(t => t + 1), 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // --- DATA FETCHING ---
   const financials = db.queryTenant<FinancialRecord>('financials', companyId);
   const transactions = db.queryTenant<Transaction>('transactions', companyId);
   const materials = db.queryTenant<Material>('materials', companyId);
+  const cashierSessions = db.queryTenant<CashierSession>('cashierSessions', companyId);
+  const users = db.queryTenant<User>('users', companyId);
+
+  // 8. TEAM PRESENCE (All Users)
+  const teamStatus = useMemo(() => {
+    return users.map(user => {
+      const lastActive = user.updated_at ? new Date(user.updated_at).getTime() : 0;
+      const now = new Date().getTime();
+      // Consider online if active within last 30 seconds
+      const isOnline = (now - lastActive) < 30 * 1000;
+
+      // Stats
+      const loginDate = user.last_login ? new Date(user.last_login) : null;
+      const logoutDate = user.last_logout ? new Date(user.last_logout) : null;
+
+      let durationStr = '---';
+      if (isOnline && loginDate) {
+        const diff = now - loginDate.getTime();
+        const h = Math.floor(diff / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        durationStr = `${h}h ${m}m`;
+      }
+
+      return {
+        id: user.id,
+        name: user.name,
+        role: user.profile,
+        avatar: user.name.charAt(0).toUpperCase(),
+        isOnline: isOnline,
+        lastLogin: loginDate ? loginDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Nunca',
+        lastLogout: logoutDate ? logoutDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '---',
+        duration: durationStr
+      };
+    }).sort((a, b) => (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0)); // Online first
+  }, [users, tick, dataVersion]);
 
   // --- DATA PROCESSING ---
 
@@ -129,9 +172,13 @@ const Dashboard: React.FC = () => {
 
   // 4. CHART DATA: EXPENSES BY CATEGORY (Pie)
   const expenseByCategoryData = useMemo(() => {
-    const expenses = financials.filter(f =>
-      ['despesa', 'compras'].includes(f.tipo) && f.status !== 'reversed'
-    );
+    const expenses = financials.filter(f => {
+      const d = f.due_date ? new Date(f.due_date) : new Date(f.created_at);
+      return ['despesa', 'compras'].includes(f.tipo) &&
+        f.status !== 'reversed' &&
+        d.getMonth() === currentMonth &&
+        d.getFullYear() === currentYear;
+    });
 
     const categoryMap = new Map<string, number>();
     expenses.forEach(f => {
@@ -167,7 +214,7 @@ const Dashboard: React.FC = () => {
     }
 
     return days.map(day => {
-      const dayStr = day.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      const dayStr = day.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 
       const income = financials
         .filter(f => {
@@ -223,10 +270,10 @@ const Dashboard: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen space-y-8 animate-in fade-in duration-500 pb-20">
+    <div className="min-h-screen space-y-8 animate-in fade-in duration-500 pb-20 p-4">
 
       {/* HEADER */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-1">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
             <Activity className="text-emerald-500" size={32} />
@@ -314,7 +361,7 @@ const Dashboard: React.FC = () => {
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1E293B', borderColor: '#334155', color: '#F8FAFC' }}
                   itemStyle={{ color: '#F8FAFC' }}
-                  formatter={(value: number) => [`R$ ${formatCurrency(value)}`, '']}
+                  formatter={(value: number, name: string) => [`R$ ${formatCurrency(value)}`, name]}
                   cursor={{ fill: 'rgba(255,255,255,0.03)' }}
                 />
                 <Bar dataKey="Receitas" fill={COLORS.secondary} radius={[4, 4, 0, 0]} barSize={30} />
@@ -370,7 +417,7 @@ const Dashboard: React.FC = () => {
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1E293B', borderColor: '#334155', color: '#F8FAFC' }}
                   itemStyle={{ color: '#F8FAFC' }}
-                  formatter={(value: number) => [`R$ ${formatCurrency(value)}`, '']}
+                  formatter={(value: number, name: string) => [`R$ ${formatCurrency(value)}`, name]}
                   cursor={{ fill: 'rgba(255,255,255,0.03)' }}
                 />
                 <Bar dataKey="Receitas" fill={COLORS.primary} radius={[4, 4, 0, 0]} barSize={20} />
@@ -386,7 +433,7 @@ const Dashboard: React.FC = () => {
             <PieChartIcon className="text-blue-500" size={20} />
             Despesas por Categoria
           </h3>
-          <p className="text-slate-400 text-sm mb-6">Onde o dinheiro está sendo gasto</p>
+          <p className="text-slate-400 text-sm mb-6">Onde o dinheiro está sendo gasto (Este Mês)</p>
 
           <div className="flex-1 min-h-[300px] relative">
             <ResponsiveContainer width="100%" height="100%">
@@ -500,24 +547,56 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* RECENT ACTIVITY (Placeholder for visually completing the layout) */}
-        <div className="bg-[#1E293B]/50 border border-slate-700/50 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center">
-          <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 mb-4">
-            <Activity size={32} />
+
+        {/* TEAM STATUS LIST */}
+        <div className="bg-[#0F172A] border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500 border border-blue-500/20">
+              <UserIcon size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white leading-none">Status da Equipe</h3>
+              <p className="text-xs text-slate-500 font-bold mt-1 uppercase tracking-wider">{teamStatus.filter(u => u.isOnline).length} Online / {teamStatus.length} Total</p>
+            </div>
           </div>
-          <h3 className="text-white font-bold mb-2">Atalhos Rápidos</h3>
-          <div className="grid grid-cols-2 gap-3 w-full mt-4">
-            <button className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold transition-all">
-              Nova Venda
-            </button>
-            <button className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold transition-all">
-              Nova Compra
-            </button>
-            <button className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold transition-all">
-              Novo Parceiro
-            </button>
-            <button className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold transition-all">
-              Relatórios
-            </button>
+
+          <div className="space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
+            {teamStatus.map(user => (
+              <div key={user.id} className={`flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border transition-all group ${user.isOnline ? 'border-brand-success/30 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'border-slate-800'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black border transition-colors ${user.isOnline ? 'bg-brand-success/10 text-brand-success border-brand-success/20' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
+                      {user.avatar}
+                    </div>
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-[#0F172A] rounded-full ${user.isOnline ? 'bg-brand-success shadow-[0_0_8px_#10B981]' : 'bg-brand-error shadow-[0_0_8px_#EF4444]'}`}></div>
+                  </div>
+                  <div>
+                    <p className={`text-sm font-bold leading-tight ${user.isOnline ? 'text-white' : 'text-slate-500'}`}>{user.name}</p>
+                    <p className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">{user.role}</p>
+                  </div>
+                </div>
+                <div className="text-right flex flex-col items-end">
+                  {user.isOnline ? (
+                    <>
+                      <p className="text-[10px] font-bold text-brand-success flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-brand-success animate-pulse"></span> Online há {user.duration}</p>
+                      <p className="text-[9px] text-slate-600 font-mono mt-0.5">Login: {user.lastLogin}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1">Offline</p>
+                      <p className="text-[9px] text-slate-600 font-mono mt-0.5">Visto: {user.lastLogout !== '---' ? user.lastLogout : user.lastLogin}</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {teamStatus.length === 0 && (
+              <div className="text-center py-12 flex flex-col items-center gap-3 opacity-50">
+                <UserIcon size={32} className="text-slate-600" />
+                <p className="text-slate-500 text-xs uppercase font-bold">Nenhum usuário encontrado</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

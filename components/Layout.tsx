@@ -116,7 +116,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
   });
 
   return (
-    <div className="flex h-screen bg-brand-dark overflow-hidden flex-col md:flex-row">
+    <div className="flex h-[100dvh] bg-brand-dark overflow-hidden flex-col md:flex-row">
       <Header
         isSyncing={false} // Layout doesn't have isSyncing directly? Oh, original used useAppContext().
         // Wait, I needs to pass isSyncing from Layout?
@@ -147,7 +147,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
         setActivePage={setActivePage}
       />
 
-      <main className="flex-1 overflow-y-auto bg-brand-dark md:p-8 relative">
+      <main className="flex-1 overflow-y-auto bg-brand-dark p-2 md:p-8 relative">
         <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {children}
         </div>

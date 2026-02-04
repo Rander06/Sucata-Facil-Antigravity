@@ -168,7 +168,7 @@ const Users: React.FC = () => {
             const isMaster = user.email === 'admin@sucatafacil.com' || user.role === UserRole.SUPER_ADMIN;
             const canManage = isCurrentSuperAdmin || (!isMaster && currentUser?.role === UserRole.COMPANY_ADMIN);
             return (
-              <div key={user.id} className="enterprise-card p-6 flex flex-col justify-between group relative bg-slate-900/10 border-slate-800">
+              <div key={user.id} className="enterprise-card p-6 flex flex-col justify-between group relative border-slate-800">
                 <div className="flex items-center gap-5"><div className={`w-14 h-14 rounded-2xl border-2 flex items-center justify-center text-2xl font-black ${isMaster ? 'bg-brand-success border-brand-success text-white' : 'bg-slate-800 border-slate-700 text-brand-success'}`}>{user.name.charAt(0)}</div><div className="flex-1 min-w-0"><h4 className="font-black text-lg truncate text-slate-100 uppercase tracking-tight">{user.name}</h4><p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">{user.email}</p></div></div>
                 <div className="mt-8 pt-5 border-t border-slate-800 flex justify-between items-center">
                   <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase border shadow-sm">{user.profile}</span>
@@ -198,7 +198,7 @@ const Users: React.FC = () => {
 
         {/* TABELA DE CONVITES (STANDARDIZED RESPONSIVE) */}
         <div className="enterprise-card overflow-hidden">
-          <div className="p-5 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+          <div className="p-5 border-b border-slate-800 flex justify-between items-center">
             <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
               <Mail className="text-brand-success" size={18} /> Gestão de Convites Enviados
             </h3>
@@ -288,11 +288,11 @@ const Users: React.FC = () => {
       {userModal.show && userModal.data && (
         <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl border-slate-700">
-            <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Edit2 size={24} /> Editar Integrante</h2><button onClick={() => setUserModal({ show: false, data: null })} className="p-2 text-slate-500"><X size={32} /></button></div>
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Edit2 size={24} /> Editar Integrante</h2><button onClick={() => setUserModal({ show: false, data: null })} className="p-2 text-slate-500"><X size={32} /></button></div>
             <form onSubmit={handleSaveUser} className="p-8 space-y-6">
               <div className="space-y-3">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
-                <input required className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
+                <label htmlFor="edit-user-name" className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
+                <input required id="edit-user-name" name="name" className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
               </div>
 
               <div className="space-y-3">
@@ -428,9 +428,12 @@ const Users: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
+                  <label htmlFor="invite-name" className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
                   <input
                     required
+                    id="invite-name"
+                    name="name"
+                    autoComplete="name"
                     className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success transition-all"
                     value={inviteForm.name}
                     onChange={e => setInviteForm({ ...inviteForm, name: e.target.value })}
@@ -438,10 +441,13 @@ const Users: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">E-mail Corporativo</label>
+                  <label htmlFor="invite-email" className="text-xs font-bold text-slate-500 uppercase tracking-widest">E-mail Corporativo</label>
                   <input
                     required
                     type="email"
+                    id="invite-email"
+                    name="email"
+                    autoComplete="email"
                     className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold outline-none focus:border-brand-success transition-all"
                     value={inviteForm.email}
                     onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })}

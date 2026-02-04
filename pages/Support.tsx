@@ -87,7 +87,7 @@ const Support: React.FC = () => {
                 currentUser?.email === 'admin@sucatafacil.com'
               )
               .map(item => (
-                <button key={item.id} onClick={() => setActiveModal(item.id as any)} className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group bg-slate-900/40 border-t-4 text-left ${item.color === 'green' ? 'border-t-brand-success shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)] hover:bg-gradient-to-b from-brand-success/10 to-transparent' : 'border-t-blue-500 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)] hover:bg-gradient-to-b from-blue-500/10 to-transparent'}`}>
+                <button key={item.id} onClick={() => setActiveModal(item.id as any)} className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group border-t-4 text-left ${item.color === 'green' ? 'border-t-brand-success shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)] hover:bg-gradient-to-b from-brand-success/10 to-transparent' : 'border-t-blue-500 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)] hover:bg-gradient-to-b from-blue-500/10 to-transparent'}`}>
                   <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-colors border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' : 'text-blue-500 group-hover:bg-blue-500/10'}`}><item.icon size={28} /></div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3>
@@ -140,11 +140,11 @@ const Support: React.FC = () => {
               <h3 className="text-3xl font-black text-white uppercase tracking-tighter">Central de Atendimento</h3>
               <p className="text-slate-400 leading-relaxed">Nossa equipe de engenharia está disponível para auxiliar na configuração da sua infraestrutura Cloud e suporte operacional v3.0.</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-8">
-                <a href="https://wa.me/5500000000000" target="_blank" rel="noreferrer" className="enterprise-card p-6 flex flex-col items-center gap-4 hover:border-brand-success transition-all bg-slate-900/50">
+                <a href="https://wa.me/5500000000000" target="_blank" rel="noreferrer" className="enterprise-card p-6 flex flex-col items-center gap-4 hover:border-brand-success transition-all">
                   <div className="p-3 bg-brand-success/10 text-brand-success rounded-xl"><MessageSquare size={24} /></div>
                   <span className="text-[10px] font-black uppercase tracking-widest">WhatsApp Business</span>
                 </a>
-                <a href="mailto:suporte@sucatafacil.com" className="enterprise-card p-6 flex flex-col items-center gap-4 hover:border-brand-success transition-all bg-slate-900/50">
+                <a href="mailto:suporte@sucatafacil.com" className="enterprise-card p-6 flex flex-col items-center gap-4 hover:border-brand-success transition-all">
                   <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl"><Mail size={24} /></div>
                   <span className="text-[10px] font-black uppercase tracking-widest">E-mail Corporativo</span>
                 </a>

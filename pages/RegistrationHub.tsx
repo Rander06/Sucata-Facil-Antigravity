@@ -122,7 +122,7 @@ const RegistrationHub: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveModal(tab.id)}
-                className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(tab.color || 'green')}`}
+                className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left border-t-4 ${getColorClasses(tab.color || 'green')}`}
               >
                 <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${tab.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
                   tab.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :

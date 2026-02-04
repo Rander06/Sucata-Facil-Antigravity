@@ -1673,7 +1673,7 @@ const FinanceHub: React.FC = () => {
               </div>
             )}
 
-            <div className="enterprise-card px-4 py-2 flex items-center gap-3 border-slate-800 bg-slate-900/50">
+            <div className="enterprise-card px-4 py-2 flex items-center gap-3 border-slate-800">
               <Landmark size={16} className="text-blue-400" />
               <div className="hidden sm:block">
                 <p className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">Saldo Bancário</p>
@@ -1745,7 +1745,7 @@ const FinanceHub: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => setActiveModal(item.id as any)}
-                className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)}`}
+                className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left border-t-4 ${getColorClasses(item.color)}`}
               >
                 <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
                   item.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
@@ -1807,7 +1807,7 @@ const FinanceHub: React.FC = () => {
                       type="text"
                       list="partner-list-options"
                       placeholder="Filtrar Parceiro..."
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-32"
+                      className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-32 placeholder:text-slate-600"
                       value={filterPartner}
                       onChange={e => setFilterPartner(e.target.value)}
                       autoComplete="off"
@@ -1824,7 +1824,7 @@ const FinanceHub: React.FC = () => {
                       name="baixas-filterSession"
                       type="text"
                       placeholder="Turno ID..."
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24"
+                      className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24 placeholder:text-slate-600"
                       value={filterSession}
                       onChange={e => setFilterSession(e.target.value)}
                       autoComplete="off"
@@ -1832,11 +1832,11 @@ const FinanceHub: React.FC = () => {
                   </div>
 
                   {/* ROW 2: Search Title & Status */}
-                  <div className="col-span-1 md:order-1 md:relative md:w-64">
+                  <div className="col-span-1 md:order-1 md:relative md:w-56">
                     <label htmlFor="baixas-searchTerm" className="sr-only">Filtrar títulos</label>
                     <div className="relative w-full">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 md:block hidden" size={14} />
-                      <input id="baixas-searchTerm" name="baixas-searchTerm" type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 px-3 md:pl-9 md:pr-4 py-2 rounded-xl text-white font-bold text-[10px] md:text-xs outline-none focus:border-brand-success" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoComplete="off" />
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 md:block hidden" size={12} />
+                      <input id="baixas-searchTerm" name="baixas-searchTerm" type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 px-3 md:pl-8 md:pr-3 py-1.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success placeholder:text-slate-600" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoComplete="off" />
                     </div>
                   </div>
 
@@ -1845,7 +1845,7 @@ const FinanceHub: React.FC = () => {
                     <select
                       id="baixas-filterStatus"
                       name="baixas-filterStatus"
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
+                      className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
                       value={filterStatus}
                       onChange={e => setFilterStatus(e.target.value)}
                     >
@@ -1961,6 +1961,8 @@ const FinanceHub: React.FC = () => {
                               <Search size={14} className="text-slate-500" />
                               <input
                                 autoFocus
+                                id="newTitle-partner-search"
+                                name="partnerSearch"
                                 type="text"
                                 placeholder="Filtrar parceiro..."
                                 className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold"
@@ -2801,7 +2803,7 @@ const FinanceHub: React.FC = () => {
               </div>
 
               {/* Grid de Campos Categorizados */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-h-[50vh] overflow-y-auto custom-scrollbar pr-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pr-4">
 
                 {/* Coluna 1: FISICO */}
                 <div className="space-y-4">
@@ -2934,7 +2936,7 @@ const FinanceHub: React.FC = () => {
                 </div>
 
                 {/* Grid de Comparação (Real vs Informado) */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-h-[50vh] overflow-y-auto custom-scrollbar pr-4">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pr-4">
 
                   {/* Grupos Categorizados */}
                   {['FISICO', 'ENTRADA_INFO', 'SAIDA_INFO'].map(group => (

@@ -17,7 +17,7 @@ const Header: React.FC<HeaderProps> = ({
     setIsMobileMenuOpen
 }) => {
     return (
-        <header className="md:hidden no-print bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between z-50 shrink-0">
+        <header className="md:hidden no-print bg-brand-dark p-4 flex items-center justify-between z-50 shrink-0">
             <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-brand-success rounded-lg flex items-center justify-center shadow-lg">
                     <Package className="text-white" size={20} />

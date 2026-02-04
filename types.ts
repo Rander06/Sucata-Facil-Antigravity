@@ -93,6 +93,8 @@ export interface User {
   created_by?: string;
   updated_at?: string;
   updated_by?: string;
+  last_login?: string;
+  last_logout?: string;
 }
 
 export interface AuthorizationRequest {

@@ -420,20 +420,20 @@ const Login: React.FC = () => {
               <p className="text-slate-500 font-medium uppercase text-[10px] tracking-widest">SaaS Cloud Infrastructure</p>
             </div>
 
-            <div className="enterprise-card p-8 border-slate-800 shadow-2xl bg-slate-900/10">
+            <div className="enterprise-card p-8 border-slate-800 shadow-2xl">
               <form onSubmit={handleLogin} className="space-y-6">
                 <div className="space-y-2">
                   <label htmlFor="email" className="text-sm font-semibold text-slate-400">Identificador de Acesso</label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                    <input id="email" name="email" type="email" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={email} onChange={e => setEmail(e.target.value)} />
+                    <input id="email" name="email" type="email" autoComplete="username" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={email} onChange={e => setEmail(e.target.value)} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="password" className="text-sm font-semibold text-slate-400">Senha</label>
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                    <input id="password" name="password" type="password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={password} onChange={e => setPassword(e.target.value)} />
+                    <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={password} onChange={e => setPassword(e.target.value)} />
                   </div>
                 </div>
                 {error && (
@@ -464,7 +464,7 @@ const Login: React.FC = () => {
         ) : mode === 'register' ? (
           <div className="animate-in fade-in slide-in-from-right-4 duration-500 w-full">
             <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800">
-              <div className="p-8 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
+              <div className="p-8 border-b border-slate-800 flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-bold">Registro de Unidade</h2>
                   <p className="text-slate-400 text-sm">Cluster Enterprise SaaS</p>
@@ -484,11 +484,11 @@ const Login: React.FC = () => {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <label htmlFor="reg-ownerName" className="text-sm font-semibold text-slate-400">Nome do Proprietário</label>
-                    <input id="reg-ownerName" name="ownerName" type="text" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium uppercase" value={regForm.ownerName} onChange={(e) => setRegForm({ ...regForm, ownerName: e.target.value })} />
+                    <input id="reg-ownerName" name="ownerName" type="text" autoComplete="name" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium uppercase" value={regForm.ownerName} onChange={(e) => setRegForm({ ...regForm, ownerName: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <label htmlFor="reg-email" className="text-sm font-semibold text-slate-400">E-mail Gestor</label>
-                    <input id="reg-email" name="email" type="email" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.email} onChange={(e) => setRegForm({ ...regForm, email: e.target.value })} />
+                    <input id="reg-email" name="email" type="email" autoComplete="email" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.email} onChange={(e) => setRegForm({ ...regForm, email: e.target.value })} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -500,6 +500,7 @@ const Login: React.FC = () => {
                           name="document"
                           type="text"
                           required
+                          autoComplete="off"
                           placeholder="000.000.000-00"
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium font-mono"
                           value={regForm.document}
@@ -517,6 +518,7 @@ const Login: React.FC = () => {
                           name="whatsapp"
                           type="tel"
                           required
+                          autoComplete="tel"
                           placeholder="(00) 00000-0000"
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium font-mono"
                           value={regForm.whatsapp}
@@ -528,7 +530,7 @@ const Login: React.FC = () => {
                   </div>
                   <div className="space-y-2">
                     <label htmlFor="reg-companyName" className="text-sm font-semibold text-slate-400">Nome Fantasia da Empresa</label>
-                    <input id="reg-companyName" name="companyName" type="text" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium uppercase" value={regForm.companyName} onChange={(e) => setRegForm({ ...regForm, companyName: e.target.value })} />
+                    <input id="reg-companyName" name="companyName" type="text" autoComplete="organization" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium uppercase" value={regForm.companyName} onChange={(e) => setRegForm({ ...regForm, companyName: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <label htmlFor="reg-planId" className="text-sm font-semibold text-slate-400">Plano de Assinatura</label>
@@ -558,11 +560,11 @@ const Login: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label htmlFor="reg-password" className="text-sm font-semibold text-slate-400">Senha</label>
-                      <input id="reg-password" name="password" type="password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.password} onChange={(e) => setRegForm({ ...regForm, password: e.target.value })} />
+                      <input id="reg-password" name="password" type="password" autoComplete="new-password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.password} onChange={(e) => setRegForm({ ...regForm, password: e.target.value })} />
                     </div>
                     <div className="space-y-2">
                       <label htmlFor="reg-confirmPassword" className="text-sm font-semibold text-slate-400">Confirmação</label>
-                      <input id="reg-confirmPassword" name="confirmPassword" type="password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.confirmPassword} onChange={(e) => setRegForm({ ...regForm, confirmPassword: e.target.value })} />
+                      <input id="reg-confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={regForm.confirmPassword} onChange={(e) => setRegForm({ ...regForm, confirmPassword: e.target.value })} />
                     </div>
                   </div>
                 </div>
@@ -577,13 +579,13 @@ const Login: React.FC = () => {
           </div>
         ) : (
           <div className="animate-in fade-in slide-in-from-right-4 duration-500 w-full text-white">
-            <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800 bg-slate-900/10">
-              <div className="p-8 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
+            <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800">
+              <div className="p-8 border-b border-slate-800 flex items-center justify-center">
                 <div>
                   <h2 className="text-2xl font-bold">Ativar Convite</h2>
                   <p className="text-slate-400 text-sm">Integração de Novo Colaborador</p>
                 </div>
-                <Link className="text-brand-success" size={32} />
+                <Link className="text-brand-success ml-4" size={32} />
               </div>
 
               {!inviteData ? (
@@ -594,6 +596,7 @@ const Login: React.FC = () => {
                       id="inv-code"
                       name="inviteCode"
                       required
+                      autoComplete="off"
                       maxLength={6}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl py-5 px-4 text-white text-center text-3xl font-black outline-none focus:ring-2 focus:ring-brand-success transition-all uppercase tracking-[0.3em] font-mono"
                       value={inviteCode}

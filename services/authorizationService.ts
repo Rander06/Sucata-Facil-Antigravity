@@ -1,5 +1,6 @@
 import { db } from './dbService';
 import { AuthorizationRequest, User } from '../types';
+import { generateUUID } from '../utils/uuid';
 
 /**
  * Auxiliar para gerar códigos curtos legíveis

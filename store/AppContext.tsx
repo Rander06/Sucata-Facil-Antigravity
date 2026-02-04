@@ -13,6 +13,7 @@ interface AppContextType {
   logout: () => void;
   isSyncing: boolean;
   isCloudEnabled: boolean;
+  isOnline: boolean;
   performManualSync: () => Promise<void>;
   pendingRequests: AuthorizationRequest[];
   refreshRequests: () => void;
@@ -28,6 +29,7 @@ interface AppContextType {
   setPosType: (type: 'buy' | 'sell' | '') => void;
   posEditingRecordId: string | null;
   setPosEditingRecordId: (id: string | null) => void;
+  dataVersion: number;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -38,6 +40,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCloudEnabled, setIsCloudEnabled] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingRequests, setPendingRequests] = useState<AuthorizationRequest[]>([]);
   const [posBuyCart, setPosBuyCart] = useState<CartItem[]>([]);
   const [posSellCart, setPosSellCart] = useState<CartItem[]>([]);
@@ -45,6 +48,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [posSellPartnerId, setPosSellPartnerId] = useState('');
   const [posType, setPosType] = useState<'buy' | 'sell' | ''>('');
   const [posEditingRecordId, setPosEditingRecordId] = useState<string | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
 
   const refreshData = useCallback(() => {
     const user = currentUser;
@@ -57,6 +61,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentCompany(null);
     }
     setIsCloudEnabled(!!db.getCloudClient());
+    setDataVersion(prev => prev + 1);
   }, [currentUser]);
 
   const refreshRequests = useCallback(() => {
@@ -80,6 +85,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [refreshData, refreshRequests]);
 
   useEffect(() => {
+    const handleStatusChange = () => {
+      setIsOnline(navigator.onLine);
+    };
+
+    window.addEventListener('online', handleStatusChange);
+    window.addEventListener('offline', handleStatusChange);
+
+    return () => {
+      window.removeEventListener('online', handleStatusChange);
+      window.removeEventListener('offline', handleStatusChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const init = async () => {
       setIsLoading(true);
       db.reInitializeCloud();
@@ -99,19 +118,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     init();
   }, []);
 
-  // Polling acelerado para 2 segundos (Enterprise v3.1 Performance Upgrade)
+  // Polling acelerado (Fallback) + Realtime Subscription initialization
   useEffect(() => {
     if (currentUser) {
+      // Fallback Polling every 5s (Aggressive fallback for mobile networks)
       const interval = setInterval(() => {
         refreshRequests();
-      }, 2000);
-      return () => clearInterval(interval);
+        const client = db.getCloudClient();
+        if (client) {
+          // Silent sync check
+          db.syncFromCloud().then(success => {
+            if (success) refreshData();
+          });
+        }
+      }, 5000);
+
+      // Initialize Realtime Subscription
+      const unsubscribe = db.subscribeToChanges(() => {
+        refreshData();
+        refreshRequests();
+      });
+
+      // Heartbeat: Update presence every 10 seconds
+      const heartbeatInterval = setInterval(() => {
+        if (currentUser) {
+          const now = new Date().toISOString();
+          db.update('users', currentUser.id, { updated_at: now });
+        }
+      }, 10000);
+
+      return () => {
+        clearInterval(interval);
+        clearInterval(heartbeatInterval);
+        unsubscribe();
+      };
     }
-  }, [currentUser, refreshRequests]);
+  }, [currentUser, refreshRequests, refreshData]);
 
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('auth_user', JSON.stringify(currentUser));
+
+      // Update Login Timestamp if not set recently (e.g., within last minute) to avoid spam on refresh
+      const now = new Date().toISOString();
+      const lastUpdate = currentUser.updated_at ? new Date(currentUser.updated_at).getTime() : 0;
+      if (Date.now() - lastUpdate > 60000) {
+        db.update('users', currentUser.id, { last_login: now, updated_at: now });
+      }
+
       db.syncFromCloud();
 
       // Initialize POS type if not set
@@ -130,6 +184,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentUser, refreshData, refreshRequests]);
 
   const logout = () => {
+    if (currentUser) {
+      const now = new Date().toISOString();
+      db.update('users', currentUser.id, { last_logout: now, updated_at: now })
+        .catch(err => console.error("Error updating logout timestamp:", err));
+    }
     setCurrentUser(null);
     setCurrentCompany(null);
     localStorage.removeItem('auth_user');
@@ -137,8 +196,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      currentUser, setCurrentUser, currentCompany, refreshData, isLoading, logout, isSyncing, isCloudEnabled, performManualSync, pendingRequests, refreshRequests,
-      posBuyCart, setPosBuyCart, posSellCart, setPosSellCart, posBuyPartnerId, setPosBuyPartnerId, posSellPartnerId, setPosSellPartnerId, posType, setPosType, posEditingRecordId, setPosEditingRecordId
+      currentUser, setCurrentUser, currentCompany, refreshData, isLoading, logout, isSyncing, isCloudEnabled, isOnline, performManualSync, pendingRequests, refreshRequests,
+      posBuyCart, setPosBuyCart, posSellCart, setPosSellCart, posBuyPartnerId, setPosBuyPartnerId, posSellPartnerId, setPosSellPartnerId, posType, setPosType, posEditingRecordId, setPosEditingRecordId,
+      dataVersion
     }}>
       {children}
     </AppContext.Provider>
