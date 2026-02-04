@@ -8,9 +8,11 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, AlertCircle, X, PlusCircle,
   FileText, Download, Printer, User as UserIcon, Receipt, Zap, Scale,
   CreditCard, Banknote, Landmark as BankIcon, Save, Loader2, Coins,
-  Calendar, Eye, Trash2, Edit, RotateCcw, Plus, PlusSquare, Lock
+  Calendar, Eye, Trash2, Edit, RotateCcw, Plus, PlusSquare, Lock, ChevronDown
 } from 'lucide-react';
-import { getBRDateOnly } from '../utils/dateHelper';
+import { getBRDateOnly, formatBRDate } from '../utils/dateHelper';
+import { normalizeText } from '../utils/textHelper';
+import { formatCurrency } from '../utils/currencyHelper';
 import { TableLayout } from '../components/FinanceTableLayout';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import { authorizationService } from '../services/authorizationService';
@@ -74,6 +76,8 @@ const FinanceHub: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const triggerRefresh = () => setRefreshKey(prev => prev + 1);
 
+  const [walletFilterOperator, setWalletFilterOperator] = useState(''); // Novo filtro de operador
+
   // Authorization State
   const [isRequestEditAuthModalOpen, setIsRequestEditAuthModalOpen] = useState(false);
   const [isRequestDeleteAuthModalOpen, setIsRequestDeleteAuthModalOpen] = useState(false);
@@ -88,6 +92,8 @@ const FinanceHub: React.FC = () => {
   const [pendingEditPayload, setPendingEditPayload] = useState<any | null>(null);
   const [isRequestEditLiquidationAuthModalOpen, setIsRequestEditLiquidationAuthModalOpen] = useState(false);
   const [isRequestDeleteLiquidationAuthModalOpen, setIsRequestDeleteLiquidationAuthModalOpen] = useState(false);
+  const [isRequestReverseAuditAuthModalOpen, setIsRequestReverseAuditAuthModalOpen] = useState(false);
+  const [auditToReverse, setAuditToReverse] = useState<CashierSession | null>(null);
   const processedAuthIds = useRef(new Set<string>());
 
   const [isLoading, setIsLoading] = useState(false);
@@ -188,6 +194,7 @@ const FinanceHub: React.FC = () => {
   });
   const [auditDateEnd, setAuditDateEnd] = useState(db.getToday());
   const [auditOperatorFilter, setAuditOperatorFilter] = useState('all');
+  const [auditAuditorFilter, setAuditAuditorFilter] = useState('all');
   const [auditFilterSessionId, setAuditFilterSessionId] = useState('');
   const [auditFilterStatus, setAuditFilterStatus] = useState('all');
 
@@ -518,6 +525,9 @@ const FinanceHub: React.FC = () => {
     vencimento: db.getToday(),
     descricao: ''
   });
+  // New Partner Selection State
+  const [isNewTitlePartnerMenuOpen, setIsNewTitlePartnerMenuOpen] = useState(false);
+  const [newTitlePartnerSearch, setNewTitlePartnerSearch] = useState('');
 
   const handleCreateTitle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -534,6 +544,12 @@ const FinanceHub: React.FC = () => {
       const selectedTermId = newTitleForm.payment_term_id || null;
       const termObj = allPaymentTerms.find(t => t.id === selectedTermId || t.uuid === selectedTermId);
       const isAVista = termObj && (termObj.days === 0 || termObj.name?.toUpperCase().includes('À VISTA') || termObj.name?.toUpperCase().includes('DINHEIRO'));
+
+      // Validação de Segurança: Títulos À VISTA exigem caixa aberto
+      if (isAVista && !activeFinanceSession) {
+        alert("Operações financeiras À VISTA (Dinheiro, Cheque, Pix) exigem um Turno Financeiro Aberto para serem registradas. Por favor, abra o caixa ou agende o título para A PRAZO.");
+        return;
+      }
 
       const payload: any = {
         company_id: companyId!,
@@ -560,9 +576,30 @@ const FinanceHub: React.FC = () => {
       };
 
       if ((newTitleForm as any).id) {
-        // UPDATE: Agora pede AUTORIZAÇÃO antes de efetivar a alteração
+        // UPDATE: Agora pede AUTORIZAÇÃO antes de efetivar a alteração COM DETALHES
         payload.id = (newTitleForm as any).id;
-        setPendingEditPayload(payload);
+
+        // Find original record to compare
+        const original = allFinancialRecords.find(r => r.id === payload.id);
+        const detailsParts = [];
+
+        if (original) {
+          if (original.valor !== payload.valor) {
+            detailsParts.push(`Valor: DE R$ ${formatCurrency(original.valor)} PARA R$ ${formatCurrency(payload.valor)}`);
+          }
+          if (original.description !== payload.description) {
+            detailsParts.push(`Desc: DE "${original.description}" PARA "${payload.description}"`);
+          }
+          if (original.due_date !== payload.due_date && original.dueDate !== payload.dueDate) {
+            const oldDate = original.due_date || original.dueDate;
+            detailsParts.push(`Venc: DE ${oldDate ? formatBRDate(oldDate) : 'N/A'} PARA ${formatBRDate(payload.due_date)}`);
+          }
+        }
+
+        // Se mudou algo, usa o detalhe, senão texto genérico
+        const detailString = detailsParts.length > 0 ? detailsParts.join(' | ') : `Alteração no Título ${payload.description}`;
+
+        setPendingEditPayload({ ...payload, _authDetails: detailString }); // Attach details to payload for modal usage
         setIsRequestEditLiquidationAuthModalOpen(true);
         return;
       } else {
@@ -874,6 +911,16 @@ const FinanceHub: React.FC = () => {
                 console.error("ESTORNAR_LIQUIDACAO: Título não encontrado no estado local:", match[1]);
               }
             }
+          } else if (req.action_key === 'ESTORNAR_AUDITORIA') {
+            const match = req.action_label.match(/TURNO: ([a-f0-9-]+)/i);
+            if (match && match[1]) {
+              const session = cashierSessions.find(s => s.id === match[1]);
+              if (session) {
+                executeReverseAudit(session, req.responded_by_id!, req.responded_by_name!);
+              } else {
+                console.error("ESTORNAR_AUDITORIA: Sessão não encontrada:", match[1]);
+              }
+            }
           } else if (req.action_key === 'SALVAR_EDICAO_FINANCEIRO') {
             const jsonPart = req.action_label.split('JSON: ')[1];
             if (jsonPart) {
@@ -978,15 +1025,17 @@ const FinanceHub: React.FC = () => {
       if (!matchDate) return false;
 
       const partner = partners.find(p => p.id === r.parceiro_id);
+      const searchNormalized = normalizeText(searchTerm);
+
       const matchesSearch =
-        r.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (partner?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
+        normalizeText(r.description).includes(searchNormalized) ||
+        normalizeText(partner?.name || '').includes(searchNormalized);
 
       const matchesType = filterType === 'ALL' || r.natureza === filterType;
 
-      const matchesSession = !filterSession || (r.caixa_id || '').toLowerCase().includes(filterSession.toLowerCase());
-      const matchesStatus = !filterStatus || status.label === filterStatus;
-      const matchesPartner = !filterPartner || (partner?.name || '').toLowerCase().includes(filterPartner.toLowerCase());
+      const matchesSession = !filterSession || normalizeText(r.caixa_id || '').includes(normalizeText(filterSession));
+      const matchesStatus = !filterStatus || normalizeText(status.label) === normalizeText(filterStatus);
+      const matchesPartner = !filterPartner || normalizeText(partner?.name || '').includes(normalizeText(filterPartner));
 
       return matchesSearch && matchesType && matchesSession && matchesStatus && matchesPartner;
     });
@@ -1012,12 +1061,13 @@ const FinanceHub: React.FC = () => {
       const sDate = getBRDateOnly(s.openingTime || s.opening_time || '');
       const matchDate = sDate >= auditDateStart && sDate <= auditDateEnd;
       const matchOperator = auditOperatorFilter === 'all' || s.userId === auditOperatorFilter || s.user_id === auditOperatorFilter;
+      const matchAuditor = auditAuditorFilter === 'all' || s.reconciledById === auditAuditorFilter || (s as any).reconciled_by_id === auditAuditorFilter;
       const matchSessionId = !auditFilterSessionId || (s.id || '').toLowerCase().includes(auditFilterSessionId.toLowerCase());
       const matchStatus = auditFilterStatus === 'all' || s.status === auditFilterStatus;
 
-      return matchDate && matchOperator && matchSessionId && matchStatus;
+      return matchDate && matchOperator && matchAuditor && matchSessionId && matchStatus;
     });
-  }, [cashierSessions, auditDateStart, auditDateEnd, auditOperatorFilter, auditFilterSessionId, auditFilterStatus]);
+  }, [cashierSessions, auditDateStart, auditDateEnd, auditOperatorFilter, auditAuditorFilter, auditFilterSessionId, auditFilterStatus]);
 
   const sessionBaixas = useMemo(() => {
     if (!activeFinanceSession) return [];
@@ -1194,7 +1244,7 @@ const FinanceHub: React.FC = () => {
         .reduce((acc, t) => acc + (t.valor_entrada || 0) - (t.valor_saida || 0), 0);
 
       if (amount > currentBankBalance + 0.01) {
-        return alert(`Saldo insuficiente na conta selecionada.\nSaldo Atual: R$ ${currentBankBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`);
+        return alert(`Saldo insuficiente na conta selecionada.\nSaldo Atual: R$ ${formatCurrency(currentBankBalance)}`);
       }
     }
 
@@ -1223,7 +1273,7 @@ const FinanceHub: React.FC = () => {
     setWalletForm({
       id: t.id,
       tipo: isEntry ? 'ENTRADA' : 'SAIDA',
-      valor: (isEntry ? t.valor_entrada : t.valor_saida).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+      valor: formatCurrency(isEntry ? t.valor_entrada : t.valor_saida),
       categoria: t.categoria || '',
       parceiro: t.parceiro || '',
       payment_term_id: t.payment_term_id || '',
@@ -1378,11 +1428,15 @@ const FinanceHub: React.FC = () => {
     }
   };
 
-  const handleReverseReconciliation = async () => {
+  const handleRequestReverseReconciliation = async () => {
     const { session } = auditModal;
-    if (!session) return;
+    setAuditToReverse(session);
+    setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {}, readOnly: false });
+    setIsRequestReverseAuditAuthModalOpen(true);
+  };
 
-    if (!confirm(`Tem certeza que deseja ESTORNAR a conferência do turno #${session.id.slice(0, 6).toUpperCase()}? \n\nIsso irá:\n1. Reabrir o turno para conferência.\n2. Excluir os depósitos gerados no Extrato Bancário.`)) return;
+  const executeReverseAudit = async (session: CashierSession, authId: string, authName: string) => {
+    if (!session) return;
 
     setIsAuditing(true);
     try {
@@ -1410,6 +1464,15 @@ const FinanceHub: React.FC = () => {
       for (const t of transactionsToDelete) {
         await db.update('walletTransactions', t.id || t.uuid, { status: 'cancelled' });
       }
+
+      // 3. Logar Ação de Auditoria (Reversão)
+      await db.logAction(
+        companyId,
+        authId,
+        authName,
+        'AUDIT_MASTER_REVERSAL',
+        `OP: Reversão de Auditoria | CTX: Hub Financeiro | DET: Reversão autorizada por ${authName} para o turno #${session.id.slice(0, 6).toUpperCase()}.`
+      );
 
       alert("Conferência estornada com sucesso! O turno está disponível para nova conferência.");
       setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {} });
@@ -1490,28 +1553,36 @@ const FinanceHub: React.FC = () => {
       return { ...t, computedBalance: runningBalance };
     });
 
-    // 4. Apply View Filters (Search, etc.)
+    // 4. Apply View Filters (Search, Operator, Date)
     let filtered = computed;
+
+    // Date Filter (Applied here so table respects it)
+    filtered = filtered.filter(t => {
+      const tDate = getBRDateOnly(t.created_at || '');
+      return tDate >= dateStart && tDate <= dateEnd;
+    });
+
     if (searchTerm) {
-      const lower = searchTerm.toLowerCase();
+      const lower = normalizeText(searchTerm);
       filtered = filtered.filter(t =>
-        (t.descricao || '').toLowerCase().includes(lower) ||
-        (t.parceiro || '').toLowerCase().includes(lower) ||
-        (t.operador_name || '').toLowerCase().includes(lower) ||
-        (t.forma || '').toLowerCase().includes(lower)
+        normalizeText(t.descricao || '').includes(lower) ||
+        normalizeText(t.parceiro || '').includes(lower) ||
+        normalizeText(t.operador_name || '').includes(lower) ||
+        normalizeText(t.forma || '').includes(lower)
       );
+    }
+
+    if (walletFilterOperator && walletFilterOperator !== 'all') {
+      filtered = filtered.filter(t => t.user_id === walletFilterOperator || (t as any).userId === walletFilterOperator);
     }
 
     // 5. Reverse for Display (Newest First)
     return filtered.reverse();
-  }, [walletTransactions, walletFilterBanco, searchTerm]);
+  }, [walletTransactions, walletFilterBanco, searchTerm, dateStart, dateEnd, walletFilterOperator]);
 
   const walletMetrics = useMemo(() => {
-    // Filter dynamicWalletData (already sorted/computed/reversed) by DATE
-    const inPeriod = dynamicWalletData.filter(t => {
-      const tDate = (t.created_at || '').substring(0, 10);
-      return tDate >= dateStart && tDate <= dateEnd;
-    });
+    // dynamicWalletData is now ALREADY filtered by date, so we just use it directly
+    const inPeriod = dynamicWalletData;
 
     let totalEntrada = 0;
     let totalSaida = 0;
@@ -1570,49 +1641,51 @@ const FinanceHub: React.FC = () => {
 
   return (
     <div className="space-y-6 md:space-y-8 pb-10">
-      <header className="flex justify-between items-center px-1">
-        <div>
-          <h1 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tight flex items-center gap-3">
-            <Wallet className="text-brand-success" size={28} /> Hub Financeiro
-          </h1>
-          <p className="text-slate-400 text-[10px] md:text-sm mt-1 font-medium uppercase tracking-widest leading-relaxed">Movimentações operacionais e liquidez cloud.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {activeFinanceSession ? (
-            <button
-              onClick={handleCloseFinanceShift}
-              className="px-4 py-2 bg-brand-warning/10 text-brand-warning border border-brand-warning/30 hover:bg-brand-warning/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
-            >
-              <ShieldCheck size={16} /> Fechar Caixa Financeiro #{activeFinanceSession.id.slice(0, 6).toUpperCase()}
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowOpenShiftModal(true)}
-              className="px-4 py-2 bg-brand-success/10 text-brand-success border border-brand-success/30 hover:bg-brand-success/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
-            >
-              <Zap size={16} /> Abrir Caixa Financeiro
-            </button>
-          )}
-
-          {activeFinanceSession && (
-            <div className="px-3 py-1.5 bg-brand-success/10 border border-brand-success/20 rounded-lg flex flex-col items-end">
-              <span className="text-[8px] font-black text-brand-success uppercase tracking-widest">Turno Ativo</span>
-              <span className="text-[10px] font-bold text-white">#{activeFinanceSession.id.slice(0, 6).toUpperCase()}</span>
-            </div>
-          )}
-
-          <div className="enterprise-card px-4 py-2 flex items-center gap-3 border-slate-800 bg-slate-900/50">
-            <Landmark size={16} className="text-blue-400" />
-            <div className="hidden sm:block">
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">Saldo Bancário</p>
-              <p className="text-sm font-black text-white">R$ {stats.currentWalletBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            </div>
+      {!activeModal && (
+        <header className="flex flex-col md:flex-row md:justify-between items-start md:items-center px-1 gap-4 md:gap-0">
+          <div>
+            <h1 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+              <Wallet className="text-brand-success" size={28} /> Hub Financeiro
+            </h1>
+            <p className="text-slate-400 text-[10px] md:text-sm mt-1 font-medium uppercase tracking-widest leading-relaxed">Movimentações operacionais e liquidez cloud.</p>
           </div>
-          <button onClick={triggerRefresh} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700 transition-all">
-            <RefreshCw size={20} className={isLoading ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </header>
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {activeFinanceSession ? (
+              <button
+                onClick={handleCloseFinanceShift}
+                className="px-4 py-2 bg-brand-warning/10 text-brand-warning border border-brand-warning/30 hover:bg-brand-warning/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
+              >
+                <ShieldCheck size={16} /> Fechar Caixa Financeiro #{activeFinanceSession.id.slice(0, 6).toUpperCase()}
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowOpenShiftModal(true)}
+                className="px-4 py-2 bg-brand-success/10 text-brand-success border border-brand-success/30 hover:bg-brand-success/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
+              >
+                <Zap size={16} /> Abrir Caixa Financeiro
+              </button>
+            )}
+
+            {activeFinanceSession && (
+              <div className="px-3 py-1.5 bg-brand-success/10 border border-brand-success/20 rounded-lg flex flex-col items-end">
+                <span className="text-[8px] font-black text-brand-success uppercase tracking-widest">Turno Ativo</span>
+                <span className="text-[10px] font-bold text-white">#{activeFinanceSession.id.slice(0, 6).toUpperCase()}</span>
+              </div>
+            )}
+
+            <div className="enterprise-card px-4 py-2 flex items-center gap-3 border-slate-800 bg-slate-900/50">
+              <Landmark size={16} className="text-blue-400" />
+              <div className="hidden sm:block">
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">Saldo Bancário</p>
+                <p className="text-sm font-black text-white">R$ {formatCurrency(stats.currentWalletBalance)}</p>
+              </div>
+            </div>
+            <button onClick={triggerRefresh} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-700 transition-all">
+              <RefreshCw size={20} className={isLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* MODAL ABERTURA DE CAIXA FINANCEIRO */}
       {showOpenShiftModal && (
@@ -1659,39 +1732,41 @@ const FinanceHub: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
-        {menuItems
-          .filter(item =>
-            currentUser?.permissions.includes(item.permission!) ||
-            currentUser?.role === UserRole.SUPER_ADMIN ||
-            currentUser?.role === UserRole.COMPANY_ADMIN ||
-            currentUser?.email === 'admin@sucatafacil.com'
-          )
-          .map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveModal(item.id as any)}
-              className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)}`}
-            >
-              <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
-                item.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
-                  'text-brand-warning group-hover:bg-brand-warning/10'
-                }`}>
-                <item.icon size={28} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3>
-                <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{item.description}</p>
-              </div>
-              <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
-            </button>
-          ))}
-      </div>
+      {!activeModal && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
+          {menuItems
+            .filter(item =>
+              currentUser?.permissions.includes(item.permission!) ||
+              currentUser?.role === UserRole.SUPER_ADMIN ||
+              currentUser?.role === UserRole.COMPANY_ADMIN ||
+              currentUser?.email === 'admin@sucatafacil.com'
+            )
+            .map(item => (
+              <button
+                key={item.id}
+                onClick={() => setActiveModal(item.id as any)}
+                className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(item.color)}`}
+              >
+                <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
+                  item.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
+                    'text-brand-warning group-hover:bg-brand-warning/10'
+                  }`}>
+                  <item.icon size={28} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3>
+                  <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{item.description}</p>
+                </div>
+                <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
+              </button>
+            ))}
+        </div>
+      )}
 
       {/* MODAL BAIXAS */}
       {activeModal === 'baixas' && (
-        <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">
-          <header className="bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
+        <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
+          <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
             <div className="flex items-center gap-3 w-full md:w-auto justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-xl bg-brand-success/10 flex items-center justify-center text-brand-success border border-brand-success/20">
@@ -1717,76 +1792,90 @@ const FinanceHub: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  setNewTitleForm({
-                    natureza: 'SAIDA',
-                    tipo: 'despesa',
-                    valor: '',
-                    categoria: '',
-                    parceiro: '',
-                    vencimento: db.getToday(),
-                    descricao: '',
-                    id: ''
-                  } as any);
-                  setShowNewTitleModal(true);
-                }}
-                className="bg-brand-success text-brand-dark px-4 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20 hover:scale-105 transition-all flex items-center gap-2"
-              >
-                <Plus size={16} /> Novo Título
-              </button>
 
-              <div className="relative w-full md:w-64">
-                <label htmlFor="baixas-searchTerm" className="sr-only">Filtrar títulos</label>
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                <input id="baixas-searchTerm" name="baixas-searchTerm" type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-              </div>
 
               <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-                <div className="flex flex-col">
-                  <label htmlFor="baixas-filterSession" className="sr-only">Turno ID</label>
-                  <input
-                    id="baixas-filterSession"
-                    name="baixas-filterSession"
-                    type="text"
-                    placeholder="Turno ID..."
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-24"
-                    value={filterSession}
-                    onChange={e => setFilterSession(e.target.value)}
-                  />
+                <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
+                  {/* SEARCH FILTERS MOBILE 2-COL */}
+
+                  {/* ROW 1: Partner & Session */}
+                  <div className="col-span-1 md:order-4 md:w-auto">
+                    <label htmlFor="baixas-filterPartner" className="sr-only">Filtrar Parceiro</label>
+                    <input
+                      id="baixas-filterPartner"
+                      name="baixas-filterPartner"
+                      type="text"
+                      list="partner-list-options"
+                      placeholder="Filtrar Parceiro..."
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-32"
+                      value={filterPartner}
+                      onChange={e => setFilterPartner(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <datalist id="partner-list-options">
+                    {partners.map(p => <option key={p.id} value={(p.name || '').toUpperCase()} />)}
+                  </datalist>
+
+                  <div className="col-span-1 md:order-3 md:w-auto">
+                    <label htmlFor="baixas-filterSession" className="sr-only">Turno ID</label>
+                    <input
+                      id="baixas-filterSession"
+                      name="baixas-filterSession"
+                      type="text"
+                      placeholder="Turno ID..."
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24"
+                      value={filterSession}
+                      onChange={e => setFilterSession(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* ROW 2: Search Title & Status */}
+                  <div className="col-span-1 md:order-1 md:relative md:w-64">
+                    <label htmlFor="baixas-searchTerm" className="sr-only">Filtrar títulos</label>
+                    <div className="relative w-full">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 md:block hidden" size={14} />
+                      <input id="baixas-searchTerm" name="baixas-searchTerm" type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 px-3 md:pl-9 md:pr-4 py-2 rounded-xl text-white font-bold text-[10px] md:text-xs outline-none focus:border-brand-success" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoComplete="off" />
+                    </div>
+                  </div>
+
+                  <div className="col-span-1 md:order-2 md:w-auto">
+                    <label htmlFor="baixas-filterStatus" className="sr-only">Status</label>
+                    <select
+                      id="baixas-filterStatus"
+                      name="baixas-filterStatus"
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
+                      value={filterStatus}
+                      onChange={e => setFilterStatus(e.target.value)}
+                    >
+                      <option value="">TODOS STATUS</option>
+                      <option value="ABERTO">ABERTO</option>
+                      <option value="ATRASADO">ATRASADO</option>
+                    </select>
+                  </div>
                 </div>
 
-                <div className="flex flex-col">
-                  <label htmlFor="baixas-filterStatus" className="sr-only">Status</label>
-                  <select
-                    id="baixas-filterStatus"
-                    name="baixas-filterStatus"
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
-                    value={filterStatus}
-                    onChange={e => setFilterStatus(e.target.value)}
+                <div className="w-full md:w-auto mt-2 md:mt-0">
+                  <button
+                    onClick={() => {
+                      setNewTitleForm({
+                        natureza: 'SAIDA',
+                        tipo: 'despesa',
+                        valor: '',
+                        categoria: '',
+                        parceiro: '',
+                        vencimento: db.getToday(),
+                        descricao: '',
+                        id: ''
+                      } as any);
+                      setShowNewTitleModal(true);
+                    }}
+                    className="w-full md:w-auto bg-brand-success text-brand-dark px-4 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20 hover:scale-105 transition-all flex items-center justify-center gap-2"
                   >
-                    <option value="">TODOS STATUS</option>
-                    <option value="ABERTO">ABERTO</option>
-                    <option value="ATRASADO">ATRASADO</option>
-                  </select>
+                    <Plus size={16} /> Novo Título
+                  </button>
                 </div>
-
-                <div className="flex flex-col">
-                  <label htmlFor="baixas-filterPartner" className="sr-only">Filtrar Parceiro</label>
-                  <input
-                    id="baixas-filterPartner"
-                    name="baixas-filterPartner"
-                    type="text"
-                    list="partner-list-options"
-                    placeholder="Filtrar Parceiro..."
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-32"
-                    value={filterPartner}
-                    onChange={e => setFilterPartner(e.target.value)}
-                  />
-                </div>
-                <datalist id="partner-list-options">
-                  {partners.map(p => <option key={p.id} value={(p.name || '').toUpperCase()} />)}
-                </datalist>
 
                 <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
                   <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
@@ -1854,24 +1943,57 @@ const FinanceHub: React.FC = () => {
 
                     <div>
                       <label htmlFor="newTitle-parceiro" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Parceiro (Fornecedor/Cliente)</label>
-                      <input
-                        id="newTitle-parceiro"
-                        name="parceiro"
-                        required
-                        type="text"
-                        list="partner-options-new"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
-                        placeholder="Busque o parceiro..."
-                        value={newTitleForm.parceiro && partners.find(p => p.id === newTitleForm.parceiro)?.name || newTitleForm.parceiro} // Mostra nome se tiver ID
-                        onChange={e => {
-                          const val = e.target.value;
-                          const found = partners.find(p => p.name.toUpperCase() === val.toUpperCase());
-                          setNewTitleForm({ ...newTitleForm, parceiro: found ? found.id : val }); // Usa ID se achar, senão texto livre (embora ideal seja ID)
-                        }}
-                      />
-                      <datalist id="partner-options-new">
-                        {partners.map(p => <option key={p.id} value={p.name.toUpperCase()} />)}
-                      </datalist>
+                      <div className="relative">
+                        <button
+                          id="newTitle-parceiro"
+                          type="button"
+                          onClick={() => setIsNewTitlePartnerMenuOpen(!isNewTitlePartnerMenuOpen)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success text-left flex items-center justify-between"
+                        >
+                          <span className={`truncate ${newTitleForm.parceiro ? 'text-white' : 'text-slate-500'}`}>
+                            {newTitleForm.parceiro ? (partners.find(p => p.id === newTitleForm.parceiro)?.name || newTitleForm.parceiro) : 'SELECIONE O PARCEIRO...'}
+                          </span>
+                          <ChevronDown size={14} className={`text-slate-500 transition-transform ${isNewTitlePartnerMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isNewTitlePartnerMenuOpen && (
+                          <div className="absolute top-full left-0 w-full mt-2 bg-brand-card border border-slate-800 rounded-xl shadow-2xl z-[200] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                            <div className="p-3 border-b border-slate-800 flex items-center gap-2 bg-slate-950/50">
+                              <Search size={14} className="text-slate-500" />
+                              <input
+                                autoFocus
+                                type="text"
+                                placeholder="Filtrar parceiro..."
+                                className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold"
+                                value={newTitlePartnerSearch}
+                                onChange={e => setNewTitlePartnerSearch(e.target.value)}
+                              />
+                            </div>
+                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                              <button
+                                type="button"
+                                onClick={() => { setNewTitleForm({ ...newTitleForm, parceiro: '' }); setIsNewTitlePartnerMenuOpen(false); }}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-[10px] font-bold text-slate-400 uppercase transition-colors border-b border-slate-800/30"
+                              >
+                                <span>-- LIMPAR SELEÇÃO --</span>
+                              </button>
+                              {partners
+                                .filter(p => p.name.toUpperCase().includes(newTitlePartnerSearch.toUpperCase()) || (p.document && p.document.includes(newTitlePartnerSearch)))
+                                .sort((a, b) => a.name.localeCompare(b.name))
+                                .map(p => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => { setNewTitleForm({ ...newTitleForm, parceiro: p.id }); setIsNewTitlePartnerMenuOpen(false); }}
+                                    className="w-full text-left px-4 py-3 hover:bg-brand-success/10 text-[10px] font-bold text-slate-300 uppercase transition-colors border-b border-slate-800/30 last:border-0 flex items-center justify-between"
+                                  >
+                                    <span>{p.name}</span>
+                                    {newTitleForm.parceiro === p.id && <CheckCircle2 size={12} className="text-brand-success" />}
+                                  </button>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div>
@@ -1879,6 +2001,7 @@ const FinanceHub: React.FC = () => {
                       <select
                         id="newTitle-paymentTerm"
                         name="payment_term_id"
+                        required
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
                         value={newTitleForm.payment_term_id}
                         onChange={e => {
@@ -1893,7 +2016,7 @@ const FinanceHub: React.FC = () => {
                           setNewTitleForm({ ...newTitleForm, payment_term_id: val, vencimento: newVenc });
                         }}
                       >
-                        <option value="">SELECIONE (OPCIONAL)...</option>
+                        <option value="">SELECIONE...</option>
                         {allPaymentTerms
                           .filter(t => t.show_in_title_launch || (t as any).showInTitleLaunch)
                           .map(t => (
@@ -1932,7 +2055,7 @@ const FinanceHub: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="md:col-span-2">
+                    <div>
                       <label htmlFor="newTitle-descricao" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Descrição</label>
                       <input
                         id="newTitle-descricao"
@@ -1969,37 +2092,30 @@ const FinanceHub: React.FC = () => {
 
           <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
             <div className="max-w-7xl mx-auto space-y-8">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 no-print">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 no-print [&>*:nth-child(odd):last-child]:col-span-2">
                 <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">A Receber (Aberto)</p>
-                  <h3 className="text-xl font-black text-white">R$ {baixasMetrics.abertoIn.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.abertoIn)}</h3>
                   <div className="flex items-center gap-1.5 mt-2 text-brand-success"><TrendingUp size={12} /><span className="text-[8px] font-bold uppercase">Projeção de Entrada</span></div>
                 </div>
                 <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/5 shadow-lg">
                   <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">A Pagar (Aberto)</p>
-                  <h3 className="text-xl font-black text-white">R$ {baixasMetrics.abertoOut.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.abertoOut)}</h3>
                   <div className="flex items-center gap-1.5 mt-2 text-brand-error"><TrendingDown size={12} /><span className="text-[8px] font-bold uppercase">Projeção de Saída</span></div>
                 </div>
                 <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/20 shadow-lg">
                   <p className="text-[9px] font-black text-brand-error uppercase tracking-widest mb-1">Atrasados (Saídas)</p>
-                  <h3 className="text-xl font-black text-white">R$ {baixasMetrics.atrasadoOut.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.atrasadoOut)}</h3>
                   <div className="flex items-center gap-1.5 mt-2 text-brand-error animate-pulse"><AlertTriangle size={12} /><span className="text-[8px] font-bold uppercase">Vencidos em Aberto</span></div>
                 </div>
                 <div className="enterprise-card p-5 border-l-4 border-l-brand-warning bg-brand-warning/10 shadow-lg">
                   <p className="text-[9px] font-black text-brand-warning uppercase tracking-widest mb-1">Atrasados (Entradas)</p>
-                  <h3 className="text-xl font-black text-white">R$ {baixasMetrics.atrasadoIn.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.atrasadoIn)}</h3>
                   <div className="flex items-center gap-1.5 mt-2 text-brand-warning"><AlertCircle size={12} /><span className="text-[8px] font-bold uppercase">Crédito Pendente</span></div>
                 </div>
               </div>
 
-              <div className="flex justify-end no-print mb-4">
-                <label htmlFor="baixas-filterNatureza" className="sr-only">Filtrar Natureza</label>
-                <select id="baixas-filterNatureza" name="baixas-filterNatureza" className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-white font-black text-[10px] uppercase outline-none focus:border-brand-success" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
-                  <option value="ALL">TODAS NATUREZAS</option>
-                  <option value="ENTRADA">SOMENTE ENTRADAS</option>
-                  <option value="SAIDA">SOMENTE SAÍDAS</option>
-                </select>
-              </div>
+
 
               {(filterType === 'ALL' || filterType === 'ENTRADA') && (
                 <TableLayout
@@ -2059,71 +2175,96 @@ const FinanceHub: React.FC = () => {
       {/* MODAL CONFERÊNCIA */}
       {
         activeModal === 'conferencia' && (
-          <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">
-            <header className="bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0 no-print">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-brand-warning/10 flex items-center justify-center text-brand-warning border border-brand-warning/20">
-                  <ShieldCheck size={18} />
+          <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
+            <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
+              <div className="flex items-center gap-3 w-full md:w-auto justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-brand-warning/10 flex items-center justify-center text-brand-warning border border-brand-warning/20">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
                 </div>
-                <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
+                <button onClick={() => setActiveModal(null)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all">
+                  <X size={18} />
+                </button>
               </div>
               <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                {/* DATE RANGE - KEEP AS IS BUT FULL WIDTH MOBILE */}
                 <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col flex-1 md:flex-none">
                     <label htmlFor="auditDateStart" className="sr-only">Data Inicial Auditoria</label>
                     <input id="auditDateStart" name="auditDateStart" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
                   </div>
                   <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                  <div className="flex flex-col">
+                  <div className="flex flex-col flex-1 md:flex-none">
                     <label htmlFor="auditDateEnd" className="sr-only">Data Final Auditoria</label>
                     <input id="auditDateEnd" name="auditDateEnd" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
                   </div>
                 </div>
 
-                <div className="flex flex-col">
-                  <label htmlFor="auditFilterSessionId" className="sr-only">Turno ID Auditoria</label>
-                  <input
-                    id="auditFilterSessionId"
-                    name="auditFilterSessionId"
-                    type="text"
-                    placeholder="Turno ID..."
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-24"
-                    value={auditFilterSessionId}
-                    onChange={e => setAuditFilterSessionId(e.target.value)}
-                  />
+                <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
+                  {/* MOBILE ROW 1: ID & STATUS */}
+                  <div className="col-span-1 md:w-auto">
+                    <label htmlFor="auditFilterSessionId" className="sr-only">Turno ID Auditoria</label>
+                    <input
+                      id="auditFilterSessionId"
+                      name="auditFilterSessionId"
+                      type="text"
+                      placeholder="Turno ID..."
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24"
+                      value={auditFilterSessionId}
+                      onChange={e => setAuditFilterSessionId(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="col-span-1 md:w-auto">
+                    <label htmlFor="auditFilterStatus" className="sr-only">Status Auditoria</label>
+                    <select
+                      id="auditFilterStatus"
+                      name="auditFilterStatus"
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
+                      value={auditFilterStatus}
+                      onChange={e => setAuditFilterStatus(e.target.value)}
+                    >
+                      <option value="all">TODOS STATUS</option>
+                      <option value="open">ABERTO</option>
+                      <option value="closed">FECHADO</option>
+                      <option value="reconciled">CONFERIDO</option>
+                    </select>
+                  </div>
+
+                  {/* MOBILE ROW 2: OPERATOR & AUDITOR */}
+                  <div className="col-span-1 md:w-auto">
+                    <label htmlFor="auditOperatorFilter" className="sr-only">Operador Auditoria</label>
+                    <select
+                      id="auditOperatorFilter"
+                      name="auditOperatorFilter"
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
+                      value={auditOperatorFilter}
+                      onChange={e => setAuditOperatorFilter(e.target.value)}
+                    >
+                      <option value="all">TODOS OPERADORES</option>
+                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="col-span-1 md:w-auto">
+                    <label htmlFor="auditAuditorFilter" className="sr-only">Auditor</label>
+                    <select
+                      id="auditAuditorFilter"
+                      name="auditAuditorFilter"
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
+                      value={auditAuditorFilter}
+                      onChange={e => setAuditAuditorFilter(e.target.value)}
+                    >
+                      <option value="all">TODOS AUDITORES</option>
+                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
+                    </select>
+                  </div>
                 </div>
 
-                <div className="flex flex-col">
-                  <label htmlFor="auditFilterStatus" className="sr-only">Status Auditoria</label>
-                  <select
-                    id="auditFilterStatus"
-                    name="auditFilterStatus"
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
-                    value={auditFilterStatus}
-                    onChange={e => setAuditFilterStatus(e.target.value)}
-                  >
-                    <option value="all">TODOS STATUS</option>
-                    <option value="open">ABERTO</option>
-                    <option value="closed">FECHADO</option>
-                    <option value="reconciled">CONFERIDO</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-col">
-                  <label htmlFor="auditOperatorFilter" className="sr-only">Operador Auditoria</label>
-                  <select
-                    id="auditOperatorFilter"
-                    name="auditOperatorFilter"
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success"
-                    value={auditOperatorFilter}
-                    onChange={e => setAuditOperatorFilter(e.target.value)}
-                  >
-                    <option value="all">TODOS OPERADORES</option>
-                    {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
-                  </select>
-                </div>
-
-                <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
+                <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
                   <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
                   <X size={18} />
                 </button>
@@ -2291,31 +2432,25 @@ const FinanceHub: React.FC = () => {
                               <td className="px-6 py-4 font-black uppercase text-brand-success/80 text-[10px]">{session.reconciledByName || session.reconciled_by_name || '-'}</td>
 
                               {/* VALOR REAL */}
-                              <td className="px-6 py-4 text-right font-black text-slate-400">
-                                R$ {valorReal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </td>
+                              <td className="px-6 py-4 text-right font-bold text-white">R$ {formatCurrency(valorReal)}</td>
 
                               {/* VALOR INFORMADO (Saldo Físico) */}
-                              <td className="px-6 py-4 text-right font-black text-white">
-                                R$ {valorInformado.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </td>
+                              <td className="px-6 py-4 text-right font-bold text-slate-300">R$ {formatCurrency(valorInformado)}</td>
 
                               {/* VALOR AUDITADO */}
-                              <td className="px-6 py-4 text-right font-black text-blue-400">
-                                {isReconciled ? `R$ ${valorAuditado.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
-                              </td>
+                              <td className="px-6 py-4 text-right font-bold text-blue-400">{isReconciled ? `R$ ${formatCurrency(valorAuditado)}` : '-'}</td>
 
                               {/* DIFERENÇA */}
                               <td className={`px-6 py-4 text-right font-black ${Math.abs(diff) < 0.005 ? 'text-slate-600' : diff > 0 ? 'text-brand-success' : 'text-brand-error'}`}>
-                                {Math.abs(diff) < 0.005 ? '-' : `R$ ${diff.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                                {Math.abs(diff) < 0.005 ? '-' : `R$ ${formatCurrency(diff)}`}
                               </td>
 
                               <td className="px-6 py-4 text-center">
-                                <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase border shadow-sm ${session.status === 'open' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' :
+                                <span className={`inline-block px-3 py-1.5 rounded-full text-[9px] font-black uppercase border shadow-sm whitespace-nowrap ${session.status === 'open' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' :
                                   session.status === 'closed' ? 'bg-brand-warning/10 text-brand-warning border-brand-warning/20' :
                                     'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                   }`}>
-                                  {session.status === 'open' ? 'Em Aberto' : session.status === 'closed' ? 'Aguardando' : 'Conferido'}
+                                  {session.status === 'open' ? 'Em Aberto' : session.status === 'closed' ? 'Aguardando Auditoria' : 'Conferido'}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-right">
@@ -2387,8 +2522,8 @@ const FinanceHub: React.FC = () => {
       {/* MODAL CARTEIRA (Bancos) */}
       {
         activeModal === 'carteira' && (
-          <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">
-            <header className="bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
+          <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
+            <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
               <div className="flex items-center gap-3 w-full md:w-auto justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
@@ -2414,28 +2549,44 @@ const FinanceHub: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="relative w-full md:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                  <input id="bankStmt-searchTerm" name="bankStmt-searchTerm" type="text" placeholder="Filtrar..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
+                  <div className="w-full md:w-auto col-span-1 order-1 md:order-3">
+                    <label htmlFor="bankStmt-operatorFilter" className="sr-only">Operador</label>
+                    <select
+                      id="bankStmt-operatorFilter"
+                      name="bankStmt-operatorFilter"
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 w-full md:w-auto md:min-w-[150px]"
+                      value={walletFilterOperator}
+                      onChange={e => setWalletFilterOperator(e.target.value)}
+                    >
+                      <option value="">TODOS OPERADORES</option>
+                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
+                    </select>
+                  </div>
+
+                  <select
+                    id="bankStmt-bankFilter"
+                    name="bankStmt-bankFilter"
+                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 w-full md:w-auto md:max-w-[150px] col-span-1 order-2 md:order-2"
+                    value={walletFilterBanco}
+                    onChange={e => setWalletFilterBanco(e.target.value)}
+                  >
+                    <option value="">TODOS BANCOS</option>
+                    {banks.map(b => <option key={b.id} value={b.name}>{(b.name || '').toUpperCase()}</option>)}
+                  </select>
+
+                  <div className="relative w-full md:w-64 col-span-1 order-3 md:order-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                    <input id="bankStmt-searchTerm" name="bankStmt-searchTerm" type="text" placeholder="Filtrar..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                  </div>
+
+                  <button
+                    onClick={() => setShowWalletManualEntry(true)}
+                    className="w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all bg-brand-success text-white shadow-brand-success/20 hover:scale-105 col-span-1 order-4 md:order-4"
+                  >
+                    Novo Lançamento
+                  </button>
                 </div>
-
-                <select
-                  id="bankStmt-bankFilter"
-                  name="bankStmt-bankFilter"
-                  className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 max-w-[150px]"
-                  value={walletFilterBanco}
-                  onChange={e => setWalletFilterBanco(e.target.value)}
-                >
-                  <option value="">TODOS BANCOS</option>
-                  {banks.map(b => <option key={b.id} value={b.name}>{(b.name || '').toUpperCase()}</option>)}
-                </select>
-
-                <button
-                  onClick={() => setShowWalletManualEntry(true)}
-                  className="w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all bg-brand-success text-white shadow-brand-success/20 hover:scale-105"
-                >
-                  Novo Lançamento
-                </button>
 
                 <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
                   <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
@@ -2446,25 +2597,25 @@ const FinanceHub: React.FC = () => {
             <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
               <div className="max-w-7xl mx-auto space-y-6">
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 no-print">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 no-print [&>*:nth-child(odd):last-child]:col-span-2">
                   <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Entradas (Período)</p>
-                    <h3 className="text-xl font-black text-white">R$ {walletMetrics.totalEntrada.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(walletMetrics.totalEntrada)}</h3>
                     <div className="flex items-center gap-1.5 mt-2 text-brand-success"><ArrowUpCircle size={12} /><span className="text-[8px] font-bold uppercase">Créditos Confirmados</span></div>
                   </div>
                   <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/5 shadow-lg">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Saídas (Período)</p>
-                    <h3 className="text-xl font-black text-white">R$ {walletMetrics.totalSaida.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(walletMetrics.totalSaida)}</h3>
                     <div className="flex items-center gap-1.5 mt-2 text-brand-error"><ArrowDownCircle size={12} /><span className="text-[8px] font-bold uppercase">Débitos Realizados</span></div>
                   </div>
                   <div className={`enterprise-card p-5 border-l-4 shadow-lg ${walletMetrics.result >= 0 ? 'border-l-blue-500 bg-blue-500/5' : 'border-l-brand-warning bg-brand-warning/5'}`}>
                     <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${walletMetrics.result >= 0 ? 'text-blue-400' : 'text-brand-warning'}`}>Resultado do Período</p>
-                    <h3 className="text-xl font-black text-white">R$ {walletMetrics.result.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(walletMetrics.result)}</h3>
                     <div className={`flex items-center gap-1.5 mt-2 ${walletMetrics.result >= 0 ? 'text-blue-400' : 'text-brand-warning'}`}><Scale size={12} /><span className="text-[8px] font-bold uppercase">Balanço do Filtro</span></div>
                   </div>
                   <div className="enterprise-card p-5 border-l-4 border-l-slate-600 bg-slate-800/30 shadow-lg">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Saldo Final (no Filtro)</p>
-                    <h3 className="text-xl font-black text-white">{walletMetrics.finalBalance !== null ? `R$ ${walletMetrics.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '---'}</h3>
+                    <h3 className="text-sm md:text-xl font-black text-white">{walletMetrics.finalBalance !== null ? `R$ ${formatCurrency(walletMetrics.finalBalance)}` : '---'}</h3>
                     <div className="flex items-center gap-1.5 mt-2 text-slate-400"><Wallet size={12} /><span className="text-[8px] font-bold uppercase">Posição Atual</span></div>
                   </div>
                 </div>
@@ -2506,9 +2657,9 @@ const FinanceHub: React.FC = () => {
                               <td className={`px-6 py-4 uppercase text-[10px] font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-success/80'}`}>
                                 {operator ? operator.name : (t.operador_name || 'Sistema')}
                               </td>
-                              <td className={`px-6 py-4 text-right font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-success'}`}>{t.valor_entrada > 0 ? `R$ ${t.valor_entrada.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
-                              <td className={`px-6 py-4 text-right font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-error'}`}>{t.valor_saida > 0 ? `R$ ${t.valor_saida.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}</td>
-                              <td className="px-6 py-4 text-right font-black text-white bg-slate-800/20">{isCancelled ? '---' : `R$ ${t.computedBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</td>
+                              <td className={`px-6 py-4 text-right font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-success'}`}>{t.valor_entrada > 0 ? `R$ ${formatCurrency(t.valor_entrada)}` : '-'}</td>
+                              <td className={`px-6 py-4 text-right font-black ${isCancelled ? 'line-through text-slate-500' : 'text-brand-error'}`}>{t.valor_saida > 0 ? `R$ ${formatCurrency(t.valor_saida)}` : '-'}</td>
+                              <td className="px-6 py-4 text-right font-black text-white bg-slate-800/20">{isCancelled ? '---' : `R$ ${formatCurrency(t.computedBalance)}`}</td>
                               <td className="px-6 py-4 text-center">
                                 {!isCancelled && (
                                   <div className="flex items-center justify-center gap-2">
@@ -2553,7 +2704,7 @@ const FinanceHub: React.FC = () => {
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Título / Identificação</p>
                   <p className="text-white font-bold text-sm uppercase leading-tight">{liquidationModal.record.description}</p>
                   <div className="flex justify-between items-end mt-4">
-                    <p className="text-brand-success font-black text-3xl">R$ {liquidationModal.record.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-brand-success font-black text-3xl">R$ {formatCurrency(liquidationModal.record.valor)}</p>
                     <p className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${liquidationModal.record.natureza === 'ENTRADA' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' : 'bg-brand-error/10 text-brand-error border-brand-error/20'}`}>{liquidationModal.record.natureza}</p>
                   </div>
                 </div>
@@ -2630,21 +2781,21 @@ const FinanceHub: React.FC = () => {
                   <div className="w-10 h-10 bg-brand-success/10 rounded-xl flex items-center justify-center text-brand-success"><Banknote size={20} /></div>
                   <div>
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Saldo Físico em Mãos</p>
-                    <p className="text-xl font-black text-white mt-1">R$ {closingMetrics.totalFisico.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(closingMetrics.totalFisico)}</p>
                   </div>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
                   <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400"><ArrowUpCircle size={20} /></div>
                   <div>
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Entradas</p>
-                    <p className="text-xl font-black text-white mt-1">R$ {closingMetrics.totalEntradasInfo.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(closingMetrics.totalEntradasInfo)}</p>
                   </div>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
                   <div className="w-10 h-10 bg-brand-error/10 rounded-xl flex items-center justify-center text-brand-error"><ArrowDownCircle size={20} /></div>
                   <div>
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Saídas</p>
-                    <p className="text-xl font-black text-brand-error mt-1">- R$ {closingMetrics.totalSaidasInfo.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xl font-black text-brand-error mt-1">- R$ {formatCurrency(closingMetrics.totalSaidasInfo)}</p>
                   </div>
                 </div>
               </div>
@@ -2760,21 +2911,21 @@ const FinanceHub: React.FC = () => {
                           <div className="w-10 h-10 bg-brand-success/10 rounded-xl flex items-center justify-center text-brand-success"><Banknote size={20} /></div>
                           <div>
                             <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Saldo Físico em Mãos</p>
-                            <p className="text-xl font-black text-white mt-1">R$ {totalFisico.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                            <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(totalFisico)}</p>
                           </div>
                         </div>
                         <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
                           <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400"><ArrowUpCircle size={20} /></div>
                           <div>
                             <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Entradas</p>
-                            <p className="text-xl font-black text-white mt-1">R$ {totalEntradas.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                            <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(totalEntradas)}</p>
                           </div>
                         </div>
                         <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
                           <div className="w-10 h-10 bg-brand-error/10 rounded-xl flex items-center justify-center text-brand-error"><ArrowDownCircle size={20} /></div>
                           <div>
                             <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Saídas</p>
-                            <p className="text-xl font-black text-brand-error mt-1">- R$ {totalSaidas.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                            <p className="text-xl font-black text-brand-error mt-1">- R$ {formatCurrency(totalSaidas)}</p>
                           </div>
                         </div>
                       </>
@@ -2805,10 +2956,10 @@ const FinanceHub: React.FC = () => {
                                   <item.icon size={12} className="text-slate-500" /> {item.label}
                                 </label>
                                 <div className="flex flex-col items-end">
-                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Sistema: R$ {systemVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-tighter">Sistema: R$ {formatCurrency(systemVal)}</span>
                                   {Math.abs(diff) > 0.005 && (
                                     <span className={`text-[10px] font-black uppercase tracking-tighter ${diff > 0 ? 'text-brand-warning' : 'text-brand-error'}`}>
-                                      Dif: {diff > 0 ? '+' : ''} R$ {diff.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                      Dif: {diff > 0 ? '+' : ''} R$ {formatCurrency(diff)}
                                     </span>
                                   )}
                                 </div>
@@ -2992,11 +3143,11 @@ const FinanceHub: React.FC = () => {
 
                               // Filtro de descrição
                               const matchDescription = !auditTransactionFilters.description ||
-                                rec.description.toLowerCase().includes(auditTransactionFilters.description.toLowerCase());
+                                normalizeText(rec.description).includes(normalizeText(auditTransactionFilters.description));
 
                               // Filtro de status (agora comparando com o label em lowercase)
                               const matchStatus = auditTransactionFilters.status === 'all' ||
-                                statusInfo.label.toLowerCase() === auditTransactionFilters.status;
+                                normalizeText(statusInfo.label) === normalizeText(auditTransactionFilters.status);
 
                               // Filtro de meio/prazo (comparação exata agora)
                               const matchPaymentTerm = !auditTransactionFilters.paymentTerm ||
@@ -3033,7 +3184,7 @@ const FinanceHub: React.FC = () => {
                                   <td className="px-4 py-3 text-slate-300 font-medium uppercase truncate max-w-xs">{rec.description}</td>
                                   <td className="px-4 py-3 text-slate-500 font-black uppercase tracking-tighter">{displayTerm}</td>
                                   <td className={`px-4 py-3 text-right font-black ${rec.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>
-                                    {rec.natureza === 'SAIDA' ? '- ' : ''}R$ {rec.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    {rec.natureza === 'SAIDA' ? '- ' : ''}R$ {formatCurrency(rec.valor)}
                                   </td>
                                   <td className="px-4 py-3 text-center">
                                     <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border shrink-0 ${statusInfo.color}`}>{statusInfo.label}</span>
@@ -3061,7 +3212,7 @@ const FinanceHub: React.FC = () => {
                       </div>
                       <button
                         type="button"
-                        onClick={handleReverseReconciliation}
+                        onClick={handleRequestReverseReconciliation}
                         className="px-6 py-4 bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg hover:text-white flex items-center gap-2"
                       >
                         <Trash2 size={16} /> Estornar Conferência
@@ -3094,7 +3245,10 @@ const FinanceHub: React.FC = () => {
             <div className="enterprise-card w-full max-md overflow-hidden shadow-2xl border-blue-500/30 animate-in zoom-in-95">
               <div className="p-6 border-b border-slate-800 bg-blue-500/5 flex justify-between items-center">
                 <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><PlusCircle className="text-blue-400" /> Lançamento Bancário</h2>
-                <button onClick={() => setShowWalletManualEntry(false)}><X size={24} className="text-slate-500" /></button>
+                <button onClick={() => {
+                  setShowWalletManualEntry(false);
+                  setWalletForm({ tipo: 'ENTRADA', valor: '', categoria: '', parceiro: '', payment_term_id: '', descricao: '', id: '' });
+                }}><X size={24} className="text-slate-500" /></button>
               </div>
               <form onSubmit={handleWalletManualSubmit} className="p-8 space-y-6">
                 <div className="grid grid-cols-2 gap-4">
@@ -3161,7 +3315,7 @@ const FinanceHub: React.FC = () => {
         }}
         actionKey="LANCAMENTO_MANUAL_CARTEIRA"
         actionLabel={`Lançamento: ${manualEntryToAuthorize?.descricao} | JSON: ${JSON.stringify(manualEntryToAuthorize)}`}
-        details={`Tipo: ${manualEntryToAuthorize?.tipo} | Valor: R$ ${manualEntryToAuthorize?.valor?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Desc: ${manualEntryToAuthorize?.descricao}`}
+        details={`Tipo: ${manualEntryToAuthorize?.tipo} | Valor: R$ ${formatCurrency(manualEntryToAuthorize?.valor || 0)} | Desc: ${manualEntryToAuthorize?.descricao}`}
       />
 
       {/* MODAL AUTH REVERSE LIQUIDATION */}
@@ -3170,7 +3324,7 @@ const FinanceHub: React.FC = () => {
         onClose={() => setIsRequestReverseLiquidationAuthModalOpen(false)}
         actionKey="ESTORNAR_LIQUIDACAO"
         actionLabel={`Solicitação para ESTORNAR Liquidação ID: ${recordToReverse?.id}`}
-        details={`Lançamento: ${recordToReverse?.description} | Valor: R$ ${recordToReverse?.valor.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        details={`Estorno de Baixa: ${recordToReverse?.description} | Valor Original: R$ ${formatCurrency(recordToReverse?.valor)} | Data Liq: ${recordToReverse?.liquidation_date ? formatBRDate(recordToReverse.liquidation_date) : 'Hoje'}`}
       />
 
       {/* MODAL AUTH EDIT COMMIT */}
@@ -3182,8 +3336,17 @@ const FinanceHub: React.FC = () => {
           setPendingEditPayload(null);
         }}
         actionKey="SALVAR_EDICAO_FINANCEIRO"
-        actionLabel={`Alteração de Lançamento Manual ID: ${pendingEditPayload?.id} | JSON: ${JSON.stringify(pendingEditPayload)}`}
-        details={`Lançamento: ${pendingEditPayload?.description} | Novo Valor: R$ ${pendingEditPayload?.valor?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+        actionLabel={`Alteração de Lançamento Manual ID: ${pendingEditPayload?.id}`}
+        details={(pendingEditPayload as any)?._authDetails || `Lançamento: ${pendingEditPayload?.description} | Novo Valor: R$ ${formatCurrency(pendingEditPayload?.valor)}`}
+      />
+
+      {/* MODAL AUTH AUDIT REVERSAL */}
+      <RequestAuthorizationModal
+        isOpen={isRequestReverseAuditAuthModalOpen}
+        onClose={() => setIsRequestReverseAuditAuthModalOpen(false)}
+        actionKey="ESTORNAR_AUDITORIA"
+        actionLabel={`Solicitação para ESTORNAR Auditoria TURNO: ${auditToReverse?.id}`}
+        details={`Reabertura de Turno Auditado #${auditToReverse?.id.slice(0, 6).toUpperCase()} | Operador: ${auditToReverse?.userName}`}
       />
 
       {/* MODAL AUTH DELETE LIQUIDATION */}
@@ -3192,7 +3355,7 @@ const FinanceHub: React.FC = () => {
         onClose={() => setIsRequestDeleteLiquidationAuthModalOpen(false)}
         actionKey="EXCLUIR_LIQUIDACAO"
         actionLabel={`Solicitação para EXCLUIR Lançamento Manual ID: ${recordToDelete?.id}`}
-        details={`Lançamento: ${recordToDelete?.description} | Valor: R$ ${recordToDelete?.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+        details={`Lançamento: ${recordToDelete?.description} | Valor: R$ ${formatCurrency(recordToDelete?.valor)} | Vencimento: ${recordToDelete?.due_date ? formatBRDate(recordToDelete.due_date) : 'N/A'}`}
       />
     </div >
   );

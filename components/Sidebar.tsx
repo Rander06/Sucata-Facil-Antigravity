@@ -36,7 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const { logout, currentUser } = useAppContext();
 
     return (
-        <aside className={`hidden md:flex no-print bg-brand-card border-r border-slate-800 transition-all duration-300 z-20 ${isSidebarOpen ? 'w-64' : 'w-20'} flex-col relative`}>
+        <aside className={`hidden md:flex no-print bg-brand-card border-r border-slate-800 transition-all duration-300 z-50 ${isSidebarOpen ? 'w-64' : 'w-20'} flex-col relative`}>
             <div className="p-6 flex items-center justify-between">
                 <div className={`flex items-center gap-3 ${!isSidebarOpen && 'hidden'}`}>
                     <Package className="text-brand-success" size={24} />

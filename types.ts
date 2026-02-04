@@ -325,6 +325,15 @@ export interface TransactionItem {
   unit: string;
 }
 
+export interface CartItem {
+  id: string;
+  material: Material;
+  quantity: number;
+  unit: 'KG' | 'UN';
+  systemPrice: number;
+  appliedPrice: number;
+}
+
 export interface CashierSession {
   id: string;
   companyId: string | null;

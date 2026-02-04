@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { User, Company, UserRole, PermissionModule, AuthorizationRequest } from '../types';
+import { User, Company, UserRole, PermissionModule, AuthorizationRequest, CartItem, OperationalProfile } from '../types';
 import { db } from '../services/dbService';
 import { authorizationService } from '../services/authorizationService';
 
@@ -16,6 +16,18 @@ interface AppContextType {
   performManualSync: () => Promise<void>;
   pendingRequests: AuthorizationRequest[];
   refreshRequests: () => void;
+  posBuyCart: CartItem[];
+  setPosBuyCart: (cart: CartItem[]) => void;
+  posSellCart: CartItem[];
+  setPosSellCart: (cart: CartItem[]) => void;
+  posBuyPartnerId: string;
+  setPosBuyPartnerId: (id: string) => void;
+  posSellPartnerId: string;
+  setPosSellPartnerId: (id: string) => void;
+  posType: 'buy' | 'sell' | '';
+  setPosType: (type: 'buy' | 'sell' | '') => void;
+  posEditingRecordId: string | null;
+  setPosEditingRecordId: (id: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -27,6 +39,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCloudEnabled, setIsCloudEnabled] = useState(false);
   const [pendingRequests, setPendingRequests] = useState<AuthorizationRequest[]>([]);
+  const [posBuyCart, setPosBuyCart] = useState<CartItem[]>([]);
+  const [posSellCart, setPosSellCart] = useState<CartItem[]>([]);
+  const [posBuyPartnerId, setPosBuyPartnerId] = useState('');
+  const [posSellPartnerId, setPosSellPartnerId] = useState('');
+  const [posType, setPosType] = useState<'buy' | 'sell' | ''>('');
+  const [posEditingRecordId, setPosEditingRecordId] = useState<string | null>(null);
 
   const refreshData = useCallback(() => {
     const user = currentUser;
@@ -95,6 +113,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUser) {
       localStorage.setItem('auth_user', JSON.stringify(currentUser));
       db.syncFromCloud();
+
+      // Initialize POS type if not set
+      if (!posType) {
+        const isSuperUser = currentUser.role === UserRole.SUPER_ADMIN || currentUser.profile === OperationalProfile.MASTER;
+        if (isSuperUser) setPosType('sell');
+        else if (currentUser.permissions.includes(PermissionModule.PURCHASES_VIEW)) setPosType('buy');
+        else if (currentUser.permissions.includes(PermissionModule.SALES_VIEW)) setPosType('sell');
+        else setPosType('buy');
+      }
     } else {
       localStorage.removeItem('auth_user');
     }
@@ -109,7 +136,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, currentCompany, refreshData, isLoading, logout, isSyncing, isCloudEnabled, performManualSync, pendingRequests, refreshRequests }}>
+    <AppContext.Provider value={{
+      currentUser, setCurrentUser, currentCompany, refreshData, isLoading, logout, isSyncing, isCloudEnabled, performManualSync, pendingRequests, refreshRequests,
+      posBuyCart, setPosBuyCart, posSellCart, setPosSellCart, posBuyPartnerId, setPosBuyPartnerId, posSellPartnerId, setPosSellPartnerId, posType, setPosType, posEditingRecordId, setPosEditingRecordId
+    }}>
       {children}
     </AppContext.Provider>
   );

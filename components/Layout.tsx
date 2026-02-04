@@ -147,7 +147,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
         setActivePage={setActivePage}
       />
 
-      <main className="flex-1 overflow-y-auto bg-brand-dark p-4 md:p-8">
+      <main className="flex-1 overflow-y-auto bg-brand-dark md:p-8 relative">
         <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {children}
         </div>

@@ -317,7 +317,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
 
       {/* MODAL: FORMULÁRIO DE PRAZO */}
       {showTermModal && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
               <h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><CreditCard className="text-brand-success" size={24} /> {editingId ? 'Editar Prazo' : 'Novo Prazo'}</h2>
@@ -378,7 +378,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
 
       {/* MODAL: FORMULÁRIO DE CATEGORIA */}
       {showCategoryModal && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-xl overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
               <h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Tag className="text-blue-400" size={24} /> {editingCategoryId ? 'Editar Categoria' : 'Nova Categoria'}</h2>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db as dbService } from '../services/dbService';
-import { Material, Partner, Transaction, FinancialRecord, PermissionModule, CashierSession, PaymentTerm, FinanceCategory, User, WalletTransaction, Bank, AuthorizationRequest, UserRole, OperationalProfile } from '../types';
+import { Material, Partner, Transaction, FinancialRecord, PermissionModule, CashierSession, PaymentTerm, FinanceCategory, User, WalletTransaction, Bank, AuthorizationRequest, UserRole, OperationalProfile, CartItem } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import { authorizationService } from '../services/authorizationService';
 import {
@@ -52,22 +52,39 @@ import {
   Banknote as CashIcon,
   Save,
   ShieldAlert,
-  Landmark
+  Landmark,
+  Eraser
 } from 'lucide-react';
+import { normalizeText } from '../utils/textHelper';
+import { formatCurrency } from '../utils/currencyHelper';
 
 const db = dbService;
 
-interface CartItem {
-  id: string;
-  material: Material;
-  quantity: number;
-  unit: 'KG' | 'UN';
-  systemPrice: number;
-  appliedPrice: number;
-}
+// CartItem interface moved to types.ts
 
 const POS: React.FC = () => {
-  const { currentUser, currentCompany, pendingRequests, refreshRequests, refreshData } = useAppContext();
+  const {
+    currentUser, currentCompany, pendingRequests, refreshRequests, refreshData,
+    posBuyCart, setPosBuyCart,
+    posSellCart, setPosSellCart,
+    posBuyPartnerId, setPosBuyPartnerId,
+    posSellPartnerId, setPosSellPartnerId,
+    posType: type, setPosType: setType,
+    posEditingRecordId: editingRecordId, setPosEditingRecordId: setEditingRecordId
+  } = useAppContext();
+
+  const cart = type === 'buy' ? posBuyCart : posSellCart;
+  const setCart = (action: React.SetStateAction<CartItem[]>) => {
+    if (type === 'buy') setPosBuyCart(action);
+    else setPosSellCart(action);
+  };
+
+  const selectedPartnerId = type === 'buy' ? posBuyPartnerId : posSellPartnerId;
+  const setSelectedPartnerId = (id: string) => {
+    if (type === 'buy') setPosBuyPartnerId(id);
+    else setPosSellPartnerId(id);
+  };
+
   const companyId = currentUser?.companyId || currentUser?.company_id || null;
 
   // @google/genai Senior Frontend Engineer: Trava de segurança para impedir re-processamento por polling de 2s
@@ -87,15 +104,8 @@ const POS: React.FC = () => {
   const [openingTerms, setOpeningTerms] = useState<PaymentTerm[]>([]);
 
   const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>([]);
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedPartnerId, setSelectedPartnerId] = useState('');
-  const [type, setType] = useState<'buy' | 'sell'>(() => {
-    const isSuperUser = currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER;
-    if (isSuperUser) return 'sell'; // Default to sell for admins
-    if (currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) return 'buy';
-    if (currentUser?.permissions.includes(PermissionModule.SALES_VIEW)) return 'sell';
-    return 'buy'; // Fallback
-  });
+  // POS state is now global via AppContext
+
 
   // ... (Lines 93-870 remain unchanged in context, but we are replacing the state init line 91)
   // Wait, I strictly cannot easily replace line 91 and 870 in one go if they are far apart.
@@ -126,7 +136,10 @@ const POS: React.FC = () => {
   const [lastClosedSession, setLastClosedSession] = useState<{ session: CashierSession, records: FinancialRecord[] } | null>(null);
 
   const [isManualEntryModalOpen, setIsManualEntryModalOpen] = useState(false);
-  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [isBillsModalOpen, setIsBillsModalOpen] = useState(false);
+  const [billsSearchTerm, setBillsSearchTerm] = useState('');
+  // editingRecordId moved to AppContext
+
   const [manualEntryForm, setManualEntryForm] = useState({
     tipo: 'saída' as 'entrada' | 'saída',
     valor: '',
@@ -215,6 +228,13 @@ const POS: React.FC = () => {
   const [editRecordToRequest, setEditRecordToRequest] = useState<any>(null);
   const [editOpeningToRequest, setEditOpeningToRequest] = useState<any>(null);
   const [editPosTxToRequest, setEditPosTxToRequest] = useState<any>(null);
+  const [pendingClosePayload, setPendingClosePayload] = useState<{
+    sessionId: string;
+    closingBalance: number;
+    expectedBalance: number;
+    difference: number;
+    physicalBreakdown: any;
+  } | null>(null);
 
   const isClosePending = useMemo(() => {
     if (!activeSession) return false;
@@ -331,19 +351,15 @@ const POS: React.FC = () => {
     if (!activeSession) return [];
 
     const financials = db.queryTenant<FinancialRecord>('financials', companyId, f => {
-      // 1. Belong to this session (Standard)
-      if (f.caixa_id === activeSession.id) return true;
-
-      // 2. Belong to this User + Timeframe (Even if moved to Finance Session)
-      // Checks if created by this user AFTER the session opened
-      if ((f.user_id === activeSession.userId || f.user_id === (activeSession as any).user_id) &&
-        f.created_at >= activeSession.openingTime!) {
-        return true;
-      }
-      return false;
+      // Strictly belong to this session
+      return f.caixa_id === activeSession.id;
     });
 
-    return financials.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return financials.sort((a, b) => {
+      const dateA = a.liquidation_date ? new Date(a.liquidation_date).getTime() : new Date(a.created_at).getTime();
+      const dateB = b.liquidation_date ? new Date(b.liquidation_date).getTime() : new Date(b.created_at).getTime();
+      return dateB - dateA;
+    });
   }, [activeSession, companyId, refreshKey]);
 
   const executeManualEntryAction = useCallback(async (tipo: 'entrada' | 'saída', valor: string, categoria: string, descricao: string, paymentTermId: string, authId: string, authName: string) => {
@@ -469,11 +485,21 @@ const POS: React.FC = () => {
               if (recordId) { await executeRecordCancel(recordId); needsLocalRefresh = true; }
             }
             else if (req.action_key === 'FECHAR_CAIXA') {
-              const initial: Record<string, string> = {};
-              dynamicClosingItems.forEach(i => initial[i.id] = '');
-              setClosingBreakdown(initial);
-              setIsClosingModalOpen(true);
-              setPendingCloseSessionId(null);
+              // PREVIOUS FLOW: Open Modal
+              // NEW FLOW: Execute Close based on payload
+              const jsonPart = req.action_label.split('JSON: ')[1];
+              if (jsonPart) {
+                const payload = JSON.parse(jsonPart);
+                await executeFinalClose(payload);
+                needsLocalRefresh = true;
+              } else {
+                // Fallback for legacy requests or manual override if needed
+                const initial: Record<string, string> = {};
+                dynamicClosingItems.forEach(i => initial[i.id] = '');
+                setClosingBreakdown(initial);
+                setIsClosingModalOpen(true);
+                setPendingCloseSessionId(null);
+              }
             }
             else if (req.action_key === 'LANCAMENTO_MANUAL') {
               const label = req.action_label;
@@ -628,7 +654,7 @@ const POS: React.FC = () => {
       if (type === 'buy') return p.type === 'supplier' || p.type === 'both';
       if (type === 'sell') return p.type === 'customer' || p.type === 'both';
       return true;
-    }).sort((a, b) => a.name.localeCompare(b.name)).filter(p => p.name.toLowerCase().includes(partnerSearch.toLowerCase()) || p.document.includes(partnerSearch));
+    }).sort((a, b) => a.name.localeCompare(b.name)).filter(p => normalizeText(p.name).includes(normalizeText(partnerSearch)) || normalizeText(p.document || '').includes(normalizeText(partnerSearch)));
   }, [partners, partnerSearch, type]);
 
   const selectedPartner = useMemo(() => partners.find(p => p.id === selectedPartnerId), [partners, selectedPartnerId]);
@@ -641,6 +667,20 @@ const POS: React.FC = () => {
       return c.type === 'both' || c.type === flowType;
     });
   }, [financeCategories, manualEntryForm.tipo]);
+
+  const pendingBills = useMemo(() => {
+    return db.queryTenant<FinancialRecord>('financials', companyId, f =>
+      f.status === 'pending'
+    ).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  }, [companyId, refreshKey]);
+
+  const filteredBills = useMemo(() => {
+    return pendingBills.filter(b => {
+      const partner = partners.find(p => p.id === (b.parceiro_id || b.parceiroId));
+      const search = normalizeText(billsSearchTerm);
+      return normalizeText(partner?.name || '').includes(search) || normalizeText(b.description || '').includes(search);
+    });
+  }, [pendingBills, billsSearchTerm, partners]);
 
   const filteredManualPdvTerms = useMemo(() => {
     return allTerms.filter(t =>
@@ -727,7 +767,8 @@ const POS: React.FC = () => {
     if (!activeSession) return;
     const pendingCount = historyRecords.filter(r => getStatusInfo(r).label === 'PENDENTE').length;
     if (pendingCount > 0) { setWarningPopup({ title: "Encerramento Impedido", message: `Existem ${pendingCount} pedidos com status PENDENTE no histórico deste turno. Você deve Finalizar a Operação de todos os itens antes de solicitar o fechamento.` }); return; }
-    setPendingCloseSessionId(activeSession.id); setIsRequestCloseAuthModalOpen(true);
+    // REMOVED PRE-AUTH: setPendingCloseSessionId(activeSession.id); setIsRequestCloseAuthModalOpen(true);
+    setIsClosingModalOpen(true);
   };
 
   const handleFinalClose = async (e: React.FormEvent) => {
@@ -741,17 +782,47 @@ const POS: React.FC = () => {
       const expectedTotal = db.calculateExpectedValue(companyId, activeSession, 'vista', [], financeCategories, 'ENTRADA') +
         db.calculateExpectedValue(companyId, activeSession, 'cheque', [], financeCategories, 'ENTRADA');
 
+      const difference = totalFisicoEmMao - expectedTotal;
+
+      // NEW FLOW: Request Authorization with details BEFORE closing
+      const payload = {
+        sessionId: activeSession.id,
+        closingBalance: totalFisicoEmMao,
+        expectedBalance: expectedTotal,
+        difference: difference,
+        physicalBreakdown: physical
+      };
+
+      setPendingCloseSessionId(activeSession.id); // For tracking ID
+      setPendingClosePayload(payload); // Store payload for execution
+      setIsRequestCloseAuthModalOpen(true); // Open Auth Modal
+      setIsClosingModalOpen(false); // Close the input modal as requested
+
+    } catch (err: any) { alert(err.message); }
+  };
+
+  const executeFinalClose = async (payload: any) => {
+    if (!payload || !activeSession) return;
+    try {
       const records = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === activeSession.id);
       const closedSessionData = await db.update<CashierSession>('cashierSessions', activeSession.id, {
         status: 'closed',
-        closingBalance: totalFisicoEmMao,
-        expectedBalance: expectedTotal,
-        difference: totalFisicoEmMao - expectedTotal,
+        closingBalance: payload.closingBalance,
+        expectedBalance: payload.expectedBalance,
+        difference: payload.difference,
         closingTime: db.getNowISO(),
-        physicalBreakdown: physical as any
+        physicalBreakdown: payload.physicalBreakdown
       });
-      setLastClosedSession({ session: closedSessionData as any, records }); setActiveSession(null); setIsClosingModalOpen(false); setShowClosingPrintPreview(true); triggerRefresh();
-    } catch (err: any) { alert(err.message); }
+      setLastClosedSession({ session: closedSessionData as any, records });
+      setActiveSession(null);
+      setIsClosingModalOpen(false);
+      setShowClosingPrintPreview(true);
+      triggerRefresh();
+      setPendingClosePayload(null);
+      setPendingCloseSessionId(null);
+    } catch (err: any) {
+      alert("Erro ao finalizar fechamento: " + err.message);
+    }
   };
 
   const handleConfirmPaymentDefinition = async (e: React.FormEvent) => {
@@ -763,7 +834,13 @@ const POS: React.FC = () => {
       const term = terms.find(t => t.id === paymentDefModal.termId || t.uuid === paymentDefModal.termId);
       const isImmediate = term && term.days === 0;
 
-      await db.update('financials', paymentDefModal.record.id, { due_date: paymentDefModal.dueDate, payment_term_id: paymentDefModal.termId, status: isImmediate ? 'paid' : 'pending', liquidation_date: isImmediate ? db.getNowISO() : null });
+      await db.update('financials', paymentDefModal.record.id, {
+        due_date: paymentDefModal.dueDate,
+        payment_term_id: paymentDefModal.termId,
+        status: isImmediate ? 'paid' : 'pending',
+        liquidation_date: isImmediate ? db.getNowISO() : null,
+        caixa_id: activeSession ? activeSession.id : (paymentDefModal.record as any).caixa_id
+      });
 
       setPaymentDefModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' }); triggerRefresh();
     } catch (err: any) { alert(err.message); } finally { setIsSubmitting(false); }
@@ -867,7 +944,7 @@ const POS: React.FC = () => {
   return (
     <div className="space-y-6 max-w-full overflow-x-hidden p-1 animate-in fade-in">
       {editingRecordId && (
-        <div className="fixed top-0 left-0 right-0 z-[100] animate-pulse no-print">
+        <div className="absolute top-0 left-0 right-0 z-[30] animate-pulse no-print">
           <div className="bg-brand-warning text-black flex items-center justify-center gap-3 py-3 px-4 shadow-[0_4px_20px_rgba(245,158,11,0.5)] border-b-2 border-black/10">
             <ShieldAlert size={20} className="shrink-0" />
             <div className="text-center">
@@ -891,14 +968,15 @@ const POS: React.FC = () => {
           </h1>
           {activeSession && <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Operador: {activeSession.userName || activeSession.user_name} • Turno Aberto às {new Date(activeSession.openingTime || '').toLocaleTimeString()}</p>}
         </div>
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1">
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full lg:w-auto">
           {!activeSession ? (
-            <button onClick={() => { triggerRefresh(); setIsOpeningModalOpen(true); }} className="bg-brand-success text-white px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 shadow-xl shadow-brand-success/20 active:scale-95 transition-all"><Unlock size={18} /> Iniciar Turno</button>
+            <button onClick={() => { triggerRefresh(); setIsOpeningModalOpen(true); }} className="col-span-2 sm:col-span-1 bg-brand-success text-white px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-brand-success/20 active:scale-95 transition-all w-full md:w-auto"><Unlock size={18} /> Iniciar Turno</button>
           ) : (
             <>
-              <button onClick={() => setIsHistoryModalOpen(true)} className="bg-slate-800 text-brand-success px-4 py-2.5 rounded-xl font-black text-[10px] uppercase border border-slate-700 flex items-center gap-2 hover:bg-slate-700 transition-all"><HistoryIcon size={14} /> Histórico</button>
-              <button onClick={() => { setEditingRecordId(null); setManualEntryForm({ tipo: 'saída', valor: '', categoria: '', descricao: '', paymentTermId: '' }); setIsManualEntryModalOpen(true); }} className="bg-slate-800 text-brand-success px-4 py-2.5 rounded-xl font-black text-[10px] uppercase border border-slate-700 flex items-center gap-2 hover:bg-slate-700 transition-all"><PlusCircle size={14} /> Lançamento</button>
-              <button onClick={handleTryClose} disabled={isClosePending} className={`${isClosePending ? 'bg-slate-700 text-slate-500' : 'bg-brand-error text-white'} px-6 py-2.5 rounded-xl font-black text-[10px] uppercase shadow-lg border border-white/10 flex items-center gap-2 active:scale-95 transition-all`}>{isClosePending ? <Loader2 className="animate-pulse" size={14} /> : <Lock size={14} />}{isClosePending ? 'Aguardando Liberação' : 'Encerrar Caixa'}</button>
+              <button onClick={() => setIsHistoryModalOpen(true)} className="bg-slate-800 text-brand-success px-4 py-2.5 rounded-xl font-black text-[10px] uppercase border border-slate-700 flex items-center justify-center gap-2 hover:bg-slate-700 transition-all w-full sm:w-auto"><HistoryIcon size={14} /> Histórico</button>
+              <button onClick={() => setIsBillsModalOpen(true)} className="bg-slate-800 text-brand-success px-4 py-2.5 rounded-xl font-black text-[10px] uppercase border border-slate-700 flex items-center justify-center gap-2 hover:bg-slate-700 transition-all w-full sm:w-auto"><FileText size={14} /> Contas</button>
+              <button onClick={() => { setEditingRecordId(null); setManualEntryForm({ tipo: 'saída', valor: '', categoria: '', descricao: '', paymentTermId: '' }); setIsManualEntryModalOpen(true); }} className="bg-slate-800 text-brand-success px-4 py-2.5 rounded-xl font-black text-[10px] uppercase border border-slate-700 flex items-center justify-center gap-2 hover:bg-slate-700 transition-all w-full sm:w-auto"><PlusCircle size={14} /> Lançamento</button>
+              <button onClick={handleTryClose} disabled={isClosePending} className={`col-span-2 sm:col-span-1 ${isClosePending ? 'bg-slate-700 text-slate-500' : 'bg-brand-error text-white'} px-6 py-2.5 rounded-xl font-black text-[10px] uppercase shadow-lg border border-white/10 flex items-center justify-center gap-2 active:scale-95 transition-all w-full sm:w-auto`}>{isClosePending ? <Loader2 className="animate-pulse" size={14} /> : <Lock size={14} />}{isClosePending ? 'Aguardando Liberação' : 'Encerrar Caixa'}</button>
             </>
           )}
         </div>
@@ -910,10 +988,10 @@ const POS: React.FC = () => {
             <div className="enterprise-card p-4 flex flex-col md:flex-row gap-4 items-center bg-slate-900/50">
               <div className="flex bg-brand-dark p-1 rounded-xl border border-slate-800 w-full md:w-auto">
                 {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) && (
-                  <button onClick={() => { if (!editingRecordId) { setType('buy'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
+                  <button onClick={() => { if (!editingRecordId) { setType('buy'); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
                 )}
                 {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.SALES_VIEW)) && (
-                  <button onClick={() => { if (!editingRecordId) { setType('sell'); setCart([]); setSelectedPartnerId(''); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'sell' ? 'bg-brand-success text-white' : 'text-slate-500'}`}>Venda</button>
+                  <button onClick={() => { if (!editingRecordId) { setType('sell'); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'sell' ? 'bg-brand-success text-white' : 'text-slate-500'}`}>Venda</button>
                 )}
               </div>
               <div className="flex-1 flex items-center gap-4 bg-brand-dark border border-slate-800 rounded-xl px-4 py-2.5 w-full focus-within:border-brand-success transition-all">
@@ -921,26 +999,86 @@ const POS: React.FC = () => {
                 <Search size={18} className="text-slate-500" /><input id="pos-search" name="pos-search" type="text" placeholder="Localizar material..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={search} onChange={e => setSearchTerm(e.target.value)} />
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar p-1">
-              {materials.filter(m => m.name.toLowerCase().includes(search.toLowerCase())).map(m => (
-                <button key={m.id} onClick={() => addToCart(m)} className="enterprise-card p-4 hover:border-brand-success hover:scale-[1.02] transition-all text-left flex flex-col justify-between h-40 bg-slate-900/40 group">
-                  <div className="flex justify-between items-start"><div className="p-2 rounded-lg bg-slate-800 text-slate-400 group-hover:text-brand-success"><Package size={20} /></div><span className="text-[10px] font-black text-slate-500 uppercase">{m.unit}</span></div>
-                  <div className="mt-4"><p className="font-bold text-xs truncate text-slate-200 uppercase">{m.name}</p><p className={`text-lg font-black mt-1 ${type === 'buy' ? 'text-brand-warning' : 'text-brand-success'}`}>R$ {(type === 'buy' ? m.buyPrice : m.sellPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-4 max-h-[70vh] overflow-y-auto custom-scrollbar p-1">
+              {materials.filter(m => normalizeText(m.name).includes(normalizeText(search))).map(m => {
+                const min = m.min_stock || m.minStock || 0;
+                const max = m.max_stock || m.maxStock || 1000;
+
+                // Redesign: Negative for shortage, >100 for excess
+                const displayPercent = m.stock < min
+                  ? ((m.stock / (min || 1)) - 1) * 100
+                  : (m.stock / (max || 1)) * 100;
+
+                const barPercent = Math.min(100, Math.max(0, (m.stock / (max || 1)) * 100));
+
+                const stockColorClass = m.stock <= min ? 'text-brand-warning' : (m.stock >= max ? 'text-brand-error' : 'text-brand-success');
+                const stockBgClass = m.stock <= min ? 'bg-brand-warning' : (m.stock >= max ? 'bg-brand-error' : 'bg-brand-success');
+
+                return (
+                  <button key={m.id} onClick={() => addToCart(m)} className="enterprise-card p-2 sm:p-3 hover:border-brand-success hover:scale-[1.02] transition-all text-left flex flex-col justify-between h-auto bg-slate-900/40 group min-h-[140px] sm:min-h-[160px]">
+                    <div className="flex justify-between items-start">
+                      <div className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-400 group-hover:text-brand-success">
+                        <Package size={16} />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[8px] font-black text-slate-500 uppercase block leading-none">{m.unit}</span>
+                        <span className={`text-[10px] font-black uppercase mt-1 block ${stockColorClass}`}>
+                          {m.stock.toLocaleString()} {m.unit}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-1.5 sm:mt-2">
+                      <p className="font-bold text-[10px] truncate text-slate-200 uppercase leading-tight">{m.name}</p>
+                      <p className={`text-base font-black mt-0.5 ${type === 'buy' ? 'text-brand-warning' : 'text-brand-success'}`}>
+                        R$ {formatCurrency(type === 'buy' ? (m.buyPrice || m.buy_price || 0) : (m.sellPrice || m.sell_price || 0))}
+                      </p>
+                    </div>
+
+                    <div className="mt-2 sm:mt-3 space-y-1.5">
+                      <div className="flex justify-between items-end">
+                        <span className="text-[7px] font-bold text-slate-600 uppercase">Estoque</span>
+                        <span className={`text-[9px] font-bold ${stockColorClass}`}>
+                          {Math.round(displayPercent)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                        <div
+                          className={`h-full transition-all duration-500 ${stockBgClass}`}
+                          style={{ width: `${barPercent}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
           <div className="w-full lg:w-[450px] shrink-0">
             <div className="enterprise-card flex flex-col h-auto lg:h-[calc(100vh-160px)] border-slate-800 shadow-2xl bg-slate-900/40 relative">
-              <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center"><h3 className="font-black flex items-center gap-3 text-white uppercase text-sm tracking-widest">Cupom</h3><span className="text-[10px] font-black text-brand-success bg-brand-success/10 px-3 py-1.5 rounded-full border border-brand-success/20">{cart.length}</span></div>
-              <div className="p-4 border-b border-slate-800/50 bg-slate-900/20 z-[60]" ref={partnerMenuRef}>
+              <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                <h3 className="font-black flex items-center gap-3 text-white uppercase text-sm tracking-widest">Cupom</h3>
+                <div className="flex items-center gap-2">
+                  {cart.length > 0 && (
+                    <button
+                      onClick={() => { if (confirm("Deseja realmente limpar todo o pedido?")) { setCart([]); setSelectedPartnerId(''); } }}
+                      className="p-1.5 bg-brand-error/10 text-brand-error hover:bg-brand-error/20 rounded-lg transition-colors"
+                      title="Limpar Pedido"
+                    >
+                      <Eraser size={14} />
+                    </button>
+                  )}
+                  <span className="text-[10px] font-black text-brand-success bg-brand-success/10 px-3 py-1.5 rounded-full border border-brand-success/20">{cart.length}</span>
+                </div>
+              </div>
+              <div className="p-4 border-b border-slate-800/50 bg-slate-900/20 z-[30]" ref={partnerMenuRef}>
                 <div className="relative">
                   <button onClick={() => setIsPartnerMenuOpen(!isPartnerMenuOpen)} className="w-full bg-brand-dark border border-slate-800 rounded-xl p-3 text-xs text-white flex items-center justify-between hover:border-brand-success transition-all outline-none">
                     <span className={`truncate font-bold uppercase ${selectedPartner ? 'text-white' : 'text-slate-500'}`}>{selectedPartner ? selectedPartner.name : 'Selecionar Parceiro...'}</span>
                     <ChevronDown size={18} className={`transition-transform duration-300 ${isPartnerMenuOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {isPartnerMenuOpen && (
-                    <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-[35] overflow-hidden animate-in fade-in slide-in-from-top-2">
                       <div className="p-3 border-b border-slate-800 flex items-center gap-2 bg-slate-950/50">
                         <label htmlFor="pos-partnerSearch" className="sr-only">Filtrar parceiro</label>
                         <Search size={14} className="text-slate-500" /><input id="pos-partnerSearch" name="pos-partnerSearch" type="text" autoFocus placeholder="Filtrar..." className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold" value={partnerSearch} onChange={e => setPartnerSearch(e.target.value)} />
@@ -956,14 +1094,14 @@ const POS: React.FC = () => {
                     <button onClick={() => setCart(cart.filter(i => i.id !== item.id))} className="absolute top-4 right-4 text-slate-600 hover:text-brand-error transition-colors p-1"><X size={16} /></button>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate max-w-[80%]">{item.material.name}</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1"><label htmlFor={`cart-quantity-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Qtd ({item.unit})</label><input id={`cart-quantity-${item.id}`} name={`cart-quantity-${item.id}`} type="number" className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.quantity} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, quantity: parseFloat(e.target.value) || 0 } : i))} /></div>
-                      <div className="space-y-1"><label htmlFor={`cart-price-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Preço Unit.</label><input id={`cart-price-${item.id}`} name={`cart-price-${item.id}`} type="number" className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.appliedPrice} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, appliedPrice: parseFloat(e.target.value) || 0 } : i))} /></div>
+                      <div className="space-y-1"><label htmlFor={`cart-quantity-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Qtd ({item.unit})</label><input id={`cart-quantity-${item.id}`} name={`cart-quantity-${item.id}`} type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.quantity} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, quantity: parseFloat(e.target.value) || 0 } : i))} /></div>
+                      <div className="space-y-1"><label htmlFor={`cart-price-${item.id}`} className="text-[8px] uppercase text-slate-600 font-black">Preço Unit.</label><input id={`cart-price-${item.id}`} name={`cart-price-${item.id}`} type="number" onFocus={(e) => e.target.select()} className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none" value={item.appliedPrice} onChange={e => setCart(cart.map(i => i.id === item.id ? { ...i, appliedPrice: parseFloat(e.target.value) || 0 } : i))} /></div>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="p-8 border-t border-slate-800 bg-slate-900/50 space-y-6 mt-auto">
-                <div className="flex justify-between items-center"><span className="text-slate-500 text-[10px] font-black uppercase">Total Bruto</span><span className="text-3xl font-black text-white">R$ {cart.reduce((s, i) => s + (i.quantity * i.appliedPrice), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                <div className="flex justify-between items-center"><span className="text-slate-500 text-[10px] font-black uppercase">Total Bruto</span><span className="text-3xl font-black text-white">R$ {formatCurrency(cart.reduce((s, i) => s + (i.quantity * i.appliedPrice), 0))}</span></div>
                 <div className={`flex gap-3 ${editingRecordId ? 'flex-col sm:flex-row' : 'flex-col'}`}>
                   <button onClick={handleCheckout} disabled={isSubmitting || cart.length === 0 || !selectedPartnerId} className="flex-1 py-5 bg-brand-success text-white font-black uppercase text-xs tracking-[0.3em] rounded-2xl shadow-xl active:scale-95 disabled:opacity-30 transition-all flex items-center justify-center gap-3">{isSubmitting ? <Loader2 className="animate-spin" size={20} /> : (editingRecordId ? 'PEDIR LIBERAÇÃO' : 'CONCLUIR OPERAÇÃO')}</button>
                   {editingRecordId && <button onClick={() => { setEditingRecordId(null); setCart([]); setSelectedPartnerId(''); }} className="py-5 px-6 bg-slate-800 text-slate-400 font-black uppercase text-[10px] tracking-widest rounded-2xl hover:bg-slate-700 transition-all border border-slate-700">CANCELAR</button>}
@@ -974,8 +1112,121 @@ const POS: React.FC = () => {
         </div>
       )}
 
+      {/* MODAL DE GERENCIAMENTO DE CONTAS */}
+      {isBillsModalOpen && (
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden flex flex-col shadow-2xl">
+            <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+                  <FileText className="text-brand-success" size={24} /> Gerenciamento de Contas
+                </h3>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">Liquidando pelo turno #{activeSession?.id.slice(0, 6).toUpperCase()}</p>
+              </div>
+              <button
+                onClick={() => setIsBillsModalOpen(false)}
+                className="p-2 hover:bg-white/10 rounded-xl transition-colors text-slate-400 hover:text-white"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-800 bg-slate-900/20">
+              <div className="flex items-center gap-4 bg-brand-dark border border-slate-800 rounded-xl px-4 py-2.5 focus-within:border-brand-success transition-all">
+                <Search size={20} className="text-slate-500" />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Pesquisar por parceiro ou descrição..."
+                  className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium"
+                  value={billsSearchTerm}
+                  onChange={e => setBillsSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+              <div className="space-y-6">
+                {['ENTRADA', 'SAIDA'].map(natureza => {
+                  const bills = filteredBills.filter(b => b.natureza === natureza);
+                  if (bills.length === 0) return null;
+
+                  return (
+                    <div key={natureza} className="space-y-3">
+                      <h4 className={`text-[10px] font-black uppercase tracking-[0.2em] px-2 flex items-center gap-2 ${natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-warning'}`}>
+                        {natureza === 'ENTRADA' ? <ArrowDownCircle size={14} /> : <ArrowUpCircle size={14} />}
+                        {natureza === 'ENTRADA' ? 'Contas a Receber' : 'Contas a Pagar'}
+                      </h4>
+                      <div className="grid gap-3">
+                        {bills.map(bill => {
+                          const partner = partners.find(p => p.id === (bill.parceiro_id || bill.parceiroId));
+                          return (
+                            <div key={bill.id} className="enterprise-card p-4 bg-slate-900/50 border-slate-800 hover:border-brand-success/50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-slate-200 uppercase text-sm">
+                                    {partner?.name || 'Parceiro não identificado'}
+                                  </p>
+                                  <span className="text-[9px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-500 uppercase">
+                                    #{bill.id.slice(0, 6).toUpperCase()}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1 uppercase font-medium">{bill.description}</p>
+                                <div className="flex items-center gap-4 mt-2">
+                                  <div className="flex items-center gap-1.5 text-slate-400">
+                                    <Calendar size={12} />
+                                    <span className="text-[10px] font-bold uppercase">Venc: {bill.due_date || bill.dueDate ? new Date(bill.due_date || bill.dueDate || '').toLocaleDateString() : 'S/DATA'}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-slate-400">
+                                    <Clock size={12} />
+                                    <span className="text-[10px] font-bold uppercase">Criado: {new Date(bill.created_at).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 border-t sm:border-t-0 sm:border-l border-slate-800 pt-4 sm:pt-0 sm:pl-6">
+                                <div className="text-right">
+                                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Valor do Título</p>
+                                  <p className={`text-lg font-black ${natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-warning'}`}>
+                                    R$ {formatCurrency(bill.valor)}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setPaymentDefModal({
+                                      show: true,
+                                      record: bill,
+                                      termId: bill.paymentTermId || bill.payment_term_id || '',
+                                      dueDate: bill.due_date || bill.dueDate || db.getToday(),
+                                      receivedValue: bill.valor.toString()
+                                    });
+                                  }}
+                                  className="bg-brand-success text-white px-4 py-2 rounded-xl font-black text-[10px] uppercase shadow-lg shadow-brand-success/10 hover:scale-105 active:scale-95 transition-all"
+                                >
+                                  Liquidar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredBills.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-600">
+                    <FileText size={48} className="opacity-20 mb-4" />
+                    <p className="font-black uppercase tracking-widest text-xs">Nenhum título pendente encontrado</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isHistoryModalOpen && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white uppercase flex items-center gap-3"><HistoryIcon size={24} className="text-brand-success" /> Histórico do Turno</h2><button onClick={() => setIsHistoryModalOpen(false)} className="text-slate-500 hover:text-white"><X size={32} /></button></div>
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
@@ -988,10 +1239,11 @@ const POS: React.FC = () => {
                     const term = terms.find(t => t.id === rec.paymentTermId || t.uuid === rec.paymentTermId || t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
                     const isPendingAction = pendingRequests.some(r => r.status === 'PENDING' && r.action_label.includes(rec.id.slice(-5)));
                     const isThisRecordBeingEdited = editingRecordId === rec.id;
+                    const displayDate = rec.liquidation_date ? new Date(rec.liquidation_date) : new Date(rec.created_at);
 
                     return (
                       <tr key={rec.id} className={`text-xs hover:bg-slate-800/20 transition-colors ${statusInfo.isStriked ? 'opacity-40 grayscale line-through text-slate-600' : ''}`}>
-                        <td className="px-4 py-4 font-mono text-slate-500">{new Date(rec.created_at).toLocaleTimeString('pt-BR')}</td>
+                        <td className="px-4 py-4 font-mono text-slate-500">{displayDate.toLocaleTimeString('pt-BR')}</td>
                         <td className="px-4 py-4 text-slate-400 font-bold uppercase truncate max-w-[150px]">{partner?.name || '---'}</td>
                         <td className="px-4 py-4 text-slate-300 font-bold uppercase truncate max-w-md">
                           {isPendingAction && <span className="text-brand-warning mr-2">[PEDIDO PENDENTE]</span>}
@@ -1008,7 +1260,7 @@ const POS: React.FC = () => {
                             {statusInfo.label === 'PENDENTE' ? '---' : (term?.name || (rec.liquidation_date ? 'À VISTA' : '---'))}
                           </span>
                         </td>
-                        <td className={`px-4 py-4 text-right font-black ${rec.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {rec.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td className={`px-4 py-4 text-right font-black ${rec.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {formatCurrency(rec.valor)}</td>
                         <td className="px-4 py-4 text-center"><span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border ${statusInfo.color}`}>{statusInfo.label}</span></td>
                         <td className="px-4 py-4 text-center">
                           <div className="flex gap-2 justify-center">
@@ -1079,7 +1331,7 @@ const POS: React.FC = () => {
 
       {/* MODAL DE ABERTURA */}
       {isOpeningModalOpen && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/98 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/98 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-sm p-8 border-slate-700 animate-in zoom-in-95">
             <div className="w-20 h-20 bg-brand-success/10 rounded-full flex items-center justify-center mx-auto mb-6 text-brand-success border border-brand-success/20">{editingRecordId ? <Edit2 size={32} /> : <Unlock size={32} />}</div>
             <h2 className="text-2xl font-black text-white uppercase tracking-tight text-center mb-8">{editingRecordId ? 'Ajustar Abertura' : 'Abertura de Terminal'}</h2>
@@ -1142,7 +1394,7 @@ const POS: React.FC = () => {
 
       {/* MODAL DE ENCERRAMENTO */}
       {isClosingModalOpen && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/98 backdrop-blur-xl p-4 animate-in fade-in overflow-y-auto">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/98 backdrop-blur-xl p-4 animate-in fade-in overflow-y-auto">
           <div className="enterprise-card w-full max-w-6xl my-auto overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border-slate-700/50 animate-in zoom-in-95 bg-slate-900/90">
             {/* Header com Metadados */}
             <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -1172,21 +1424,21 @@ const POS: React.FC = () => {
                   <div className="w-10 h-10 bg-brand-success/10 rounded-xl flex items-center justify-center text-brand-success"><Banknote size={20} /></div>
                   <div>
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Saldo Físico em Mãos</p>
-                    <p className="text-xl font-black text-white mt-1">R$ {closingMetrics.totalFisico.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(closingMetrics.totalFisico)}</p>
                   </div>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
                   <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400"><ArrowUpCircle size={20} /></div>
                   <div>
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Entradas</p>
-                    <p className="text-xl font-black text-white mt-1">R$ {closingMetrics.totalEntradasInfo.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(closingMetrics.totalEntradasInfo)}</p>
                   </div>
                 </div>
                 <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
                   <div className="w-10 h-10 bg-brand-error/10 rounded-xl flex items-center justify-center text-brand-error"><ArrowDownCircle size={20} /></div>
                   <div>
                     <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Saídas</p>
-                    <p className="text-xl font-black text-brand-error mt-1">- R$ {closingMetrics.totalSaidasInfo.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-xl font-black text-brand-error mt-1">- R$ {formatCurrency(closingMetrics.totalSaidasInfo)}</p>
                   </div>
                 </div>
               </div>
@@ -1262,7 +1514,7 @@ const POS: React.FC = () => {
 
       {/* MODAL LANÇAMENTO MANUAL */}
       {isManualEntryModalOpen && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-md overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
               <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><PlusCircle className="text-brand-success" /> Lançamento no Turno</h2>
@@ -1307,7 +1559,7 @@ const POS: React.FC = () => {
 
       {/* MODAL DEFINIÇÃO PAGAMENTO */}
       {paymentDefModal.show && paymentDefModal.record && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-md overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
               <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><CreditCard className="text-brand-success" /> Finalizar Operação</h2>
@@ -1316,7 +1568,7 @@ const POS: React.FC = () => {
             <form onSubmit={handleConfirmPaymentDefinition} className="p-8 space-y-6">
               <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total do Pedido</p>
-                <p className="text-white font-black text-2xl">R$ {paymentDefModal.record.valor.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                <p className="text-white font-black text-2xl">R$ {formatCurrency(paymentDefModal.record.valor)}</p>
               </div>
               <div className="space-y-4">
                 <div className="space-y-1">
@@ -1366,7 +1618,7 @@ const POS: React.FC = () => {
 
       {/* POPUP DE AVISO */}
       {warningPopup && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-sm p-8 text-center space-y-4 border-brand-error/20 bg-brand-error/5">
             <div className="w-20 h-20 bg-brand-error/10 rounded-full flex items-center justify-center mx-auto text-brand-error border border-brand-error/20"><AlertCircle size={40} /></div>
             <h2 className="text-xl font-black text-white uppercase tracking-tight">{warningPopup.title}</h2>
@@ -1378,7 +1630,7 @@ const POS: React.FC = () => {
 
       {/* PREVIEW IMPRESSÃO RECIBO */}
       {viewingTransactionForPrint && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-sm overflow-hidden shadow-2xl border-slate-700 bg-white text-black p-8 font-mono text-[10px]">
             <div className="text-center space-y-1 mb-6 border-b-2 border-dashed border-black pb-4">
               <p className="text-base font-black uppercase">Sucata Fácil Enterprise</p>
@@ -1398,11 +1650,11 @@ const POS: React.FC = () => {
                 <div key={idx} className="flex justify-between uppercase">
                   <span>{item.materialName || item.material_name}</span>
                   <span>{item.quantity} {item.unit}</span>
-                  <span>R$ {item.total.toLocaleString()}</span>
+                  <span>R$ {formatCurrency(item.total)}</span>
                 </div>
               ))}
             </div>
-            <div className="flex justify-between text-base font-black mb-8"><span>TOTAL:</span> <span>R$ {viewingTransactionForPrint.valor.toLocaleString()}</span></div>
+            <div className="flex justify-between text-base font-black mb-8"><span>TOTAL:</span> <span>R$ {formatCurrency(viewingTransactionForPrint.valor)}</span></div>
             <div className="text-center pt-8 border-t-2 border-dashed border-black space-y-4">
               <p className="uppercase">Operador: {currentUser?.name}</p>
               <div className="h-10 border-b border-black w-full mx-auto"></div>
@@ -1464,12 +1716,12 @@ const POS: React.FC = () => {
         isOpen={isRequestCloseAuthModalOpen}
         onClose={() => setIsRequestCloseAuthModalOpen(false)}
         actionKey="FECHAR_CAIXA"
-        actionLabel={pendingCloseSessionId ? `FECHAMENTO CAIXA ID: ${pendingCloseSessionId}` : ''}
+        actionLabel={pendingClosePayload ? `FECHAMENTO CAIXA ID: ${pendingCloseSessionId} | FISICO: ${formatCurrency(pendingClosePayload.closingBalance)} | ESPERADO: ${formatCurrency(pendingClosePayload.expectedBalance)} | DIF: ${formatCurrency(pendingClosePayload.difference)} | JSON: ${JSON.stringify(pendingClosePayload)}` : ''}
       />
 
       {/* PREVIEW IMPRESSÃO FECHAMENTO */}
       {showClosingPrintPreview && lastClosedSession && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-sm overflow-hidden shadow-2xl border-slate-700 bg-white text-black p-8 font-mono text-[10px]">
             <div className="text-center space-y-1 mb-6 border-b-2 border-dashed border-black pb-4">
               <p className="text-base font-black uppercase">Sucata Fácil Enterprise</p>
@@ -1494,11 +1746,11 @@ const POS: React.FC = () => {
               <p className="flex justify-between"><span>TURNO ID:</span> <span>#{lastClosedSession.session.id.slice(0, 8).toUpperCase()}</span></p>
             </div>
             <div className="border-y-2 border-dashed border-black py-4 space-y-2 mb-4">
-              <p className="flex justify-between"><span>ABERTURA (TROCO):</span> <span>R$ {(lastClosedSession.session.openingBalance || lastClosedSession.session.opening_balance || 0).toLocaleString()}</span></p>
+              <p className="flex justify-between"><span>ABERTURA (TROCO):</span> <span>R$ {formatCurrency(lastClosedSession.session.openingBalance || lastClosedSession.session.opening_balance || 0)}</span></p>
               <p className="flex justify-between font-black uppercase"><span>MÉTRICAS FÍSICAS:</span></p>
-              <p className="flex justify-between"><span>FISICO INFORMADO:</span> <span>R$ {(lastClosedSession.session.closingBalance || lastClosedSession.session.closing_balance || 0).toLocaleString()}</span></p>
-              <p className="flex justify-between"><span>SISTEMA ESPERADO:</span> <span>R$ {(lastClosedSession.session.expectedBalance || lastClosedSession.session.expected_balance || 0).toLocaleString()}</span></p>
-              <p className="flex justify-between font-black border-t border-black pt-1"><span>DIFERENÇA:</span> <span className={(lastClosedSession.session.difference || 0) < 0 ? 'text-red-600' : ''}>R$ {(lastClosedSession.session.difference || 0).toLocaleString()}</span></p>
+              <p className="flex justify-between"><span>FISICO INFORMADO:</span> <span>R$ {formatCurrency(lastClosedSession.session.closingBalance || lastClosedSession.session.closing_balance || 0)}</span></p>
+              <p className="flex justify-between"><span>SISTEMA ESPERADO:</span> <span>R$ {formatCurrency(lastClosedSession.session.expectedBalance || lastClosedSession.session.expected_balance || 0)}</span></p>
+              <p className="flex justify-between font-black border-t border-black pt-1"><span>DIFERENÇA:</span> <span className={(lastClosedSession.session.difference || 0) < 0 ? 'text-red-600' : ''}>R$ {formatCurrency(lastClosedSession.session.difference || 0)}</span></p>
             </div>
             <div className="text-center pt-8 space-y-4">
               <p className="uppercase">Visto Auditoria Cloud</p>

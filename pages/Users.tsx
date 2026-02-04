@@ -286,7 +286,7 @@ const Users: React.FC = () => {
       </div>
 
       {userModal.show && userModal.data && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Edit2 size={24} /> Editar Integrante</h2><button onClick={() => setUserModal({ show: false, data: null })} className="p-2 text-slate-500"><X size={32} /></button></div>
             <form onSubmit={handleSaveUser} className="p-8 space-y-6">
@@ -397,7 +397,7 @@ const Users: React.FC = () => {
 
       {/* MODAL DE CONVITE */}
       {showInviteModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-2xl overflow-hidden shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
               <h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest">

@@ -108,40 +108,44 @@ const RegistrationHub: React.FC = () => {
 
   return (
     <div className="space-y-6 md:space-y-8 pb-10">
-      <header className="px-1">
-        <h1 className="text-2xl md:text-4xl font-black flex items-center gap-3 text-white uppercase tracking-tight">
-          <ClipboardList className="text-brand-success" /> Cadastro Geral
-        </h1>
-        <p className="text-slate-400 text-[10px] md:text-sm mt-1 font-medium uppercase tracking-widest">Configuração estrutural da unidade.</p>
-      </header>
+      {!activeModal && (
+        <>
+          <header className="px-1">
+            <h1 className="text-2xl md:text-4xl font-black flex items-center gap-3 text-white uppercase tracking-tight">
+              <ClipboardList className="text-brand-success" /> Cadastro Geral
+            </h1>
+            <p className="text-slate-400 text-[10px] md:text-sm mt-1 font-medium uppercase tracking-widest">Configuração estrutural da unidade.</p>
+          </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
-        {allowedTabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveModal(tab.id)}
-            className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(tab.color || 'green')}`}
-          >
-            <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${tab.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
-              tab.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
-                tab.color === 'yellow' ? 'text-brand-warning group-hover:bg-brand-warning/10' :
-                  tab.color === 'red' ? 'text-brand-error group-hover:bg-brand-error/10' :
-                    'text-indigo-400 group-hover:bg-indigo-500/10'
-              }`}>
-              <tab.icon size={28} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{tab.label}</h3>
-              <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{tab.description}</p>
-            </div>
-            <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
-          </button>
-        ))}
-      </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
+            {allowedTabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveModal(tab.id)}
+                className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group text-left bg-slate-900/40 border-t-4 ${getColorClasses(tab.color || 'green')}`}
+              >
+                <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-all border border-slate-700 ${tab.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' :
+                  tab.color === 'blue' ? 'text-blue-400 group-hover:bg-blue-500/10' :
+                    tab.color === 'yellow' ? 'text-brand-warning group-hover:bg-brand-warning/10' :
+                      tab.color === 'red' ? 'text-brand-error group-hover:bg-brand-error/10' :
+                        'text-indigo-400 group-hover:bg-indigo-500/10'
+                  }`}>
+                  <tab.icon size={28} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{tab.label}</h3>
+                  <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{tab.description}</p>
+                </div>
+                <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {activeModal && (
-        <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in duration-200">
-          <header className="bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
+        <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
+          <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-xl bg-brand-success/10 flex items-center justify-center text-brand-success border border-brand-success/20">
                 {React.createElement(allowedTabs.find(t => t.id === activeModal)?.icon || Layers, { size: 18 })}

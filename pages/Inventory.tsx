@@ -4,6 +4,8 @@ import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
 import { Material, PermissionModule, AuthorizationRequest } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
+import { normalizeText } from '../utils/textHelper';
+import { formatCurrency } from '../utils/currencyHelper';
 import {
   Package,
   Plus,
@@ -24,6 +26,7 @@ import {
 const Inventory: React.FC = () => {
   const { currentUser, pendingRequests, refreshRequests } = useAppContext();
   const companyId = currentUser?.companyId || currentUser?.company_id || '';
+  const isMaster = currentUser?.role === 'SUPER_ADMIN'; // Only SUPER_ADMIN bypasses auth now
 
   const [materials, setMaterials] = useState<Material[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -108,39 +111,49 @@ const Inventory: React.FC = () => {
     e.preventDefault();
     if (modalMode === 'view') return;
 
-    if (modalMode === 'edit' && editingId) {
-      if (!currentUser?.permissions.includes(PermissionModule.STOCK_EDIT)) {
-        // Se não tem permissão direta, usa fluxo de autorização
-        const original = materials.find(m => m.id === editingId);
-        if (original) {
-          const delta: any = {};
-          let hasChanges = false;
-          Object.keys(formData).forEach(k => {
-            const key = k as keyof Material;
-            if (formData[key] !== original[key] && !['id', 'companyId', 'company_id', 'created_at'].includes(k)) {
-              delta[k] = formData[key];
-              hasChanges = true;
-            }
-          });
-          if (!hasChanges) return setSearchModal(false);
-          setEditToRequest({ id: editingId, name: original.name, data: delta });
-          setIsRequestEditAuthModalOpen(true);
-        }
-        return;
-      }
+    const dbPayload = {
+      name: formData.name,
+      unit: formData.unit,
+      stock: formData.stock,
+      min_stock: formData.minStock,
+      max_stock: formData.maxStock,
+      buy_price: formData.buyPrice,
+      sell_price: formData.sellPrice,
+      updated_at: new Date().toISOString()
+    };
 
-      // Tem permissão direta
-      await db.update('materials', editingId, formData);
-      db.logAction(companyId, currentUser.id, currentUser.name, 'STOCK_EDIT', `Editou material ${formData.name}`);
-      setSearchModal(false); loadMaterials(); setEditingId(null);
+    if (modalMode === 'edit' && editingId) {
+      // PROCESSO PADRONIZADO: Todos os perfis (incluindo SUPER_ADMIN) devem solicitar autorização
+      // A execução da edição ocorre via useEffect ao detectar status 'APPROVED'
+      const original = materials.find(m => m.id === editingId);
+      if (original) {
+        const delta: any = {};
+        let hasChanges = false;
+
+        if (formData.name !== original.name) { delta.name = formData.name; hasChanges = true; }
+        if (formData.unit !== original.unit) { delta.unit = formData.unit; hasChanges = true; }
+        if (formData.minStock !== (original.min_stock || original.minStock)) { delta.min_stock = formData.minStock; hasChanges = true; }
+        if (formData.maxStock !== (original.max_stock || original.maxStock)) { delta.max_stock = formData.maxStock; hasChanges = true; }
+        if (formData.buyPrice !== (original.buy_price || original.buyPrice)) { delta.buy_price = formData.buyPrice; hasChanges = true; }
+        if (formData.sellPrice !== (original.sell_price || original.sellPrice)) { delta.sell_price = formData.sellPrice; hasChanges = true; }
+        if (formData.stock !== original.stock) { delta.stock = formData.stock; hasChanges = true; }
+
+        if (!hasChanges) return setSearchModal(false);
+        setEditToRequest({ id: editingId, name: original.name, data: delta });
+        setIsRequestEditAuthModalOpen(true);
+      }
+      return;
+
+      // Código de bypass direto removido para padronização
+
 
     } else {
       // CREATE MODE
-      if (!currentUser?.permissions.includes(PermissionModule.STOCK_CREATE)) {
+      if (!isMaster && !currentUser?.permissions.includes(PermissionModule.STOCK_CREATE)) {
         alert("Você não tem permissão para cadastrar novos materiais.");
         return;
       }
-      await db.insert<Material>('materials', { ...formData, companyId, usuario_id: currentUser?.id });
+      await db.insert<Material>('materials', { ...dbPayload, company_id: companyId, companyId, usuario_id: currentUser?.id, created_at: new Date().toISOString() });
       db.logAction(companyId, currentUser!.id, currentUser!.name, 'STOCK_ADD', `CADASTRADO: Novo material "${formData.name}"`);
       setSearchModal(false); loadMaterials();
     }
@@ -151,31 +164,16 @@ const Inventory: React.FC = () => {
     const newVal = parseFloat(adjustModal.newVal);
     if (isNaN(newVal)) return;
 
-    if (currentUser?.permissions.includes(PermissionModule.STOCK_ADJUST)) {
-      // Permissão direta de ajuste
-      db.update('materials', adjustModal.material.id, { stock: newVal });
-      db.logAction(companyId, currentUser.id, currentUser.name, 'STOCK_ADJUST', `Ajuste manual de saldo: ${adjustModal.material.name} para ${newVal}`);
-      setAdjustModal({ show: false, material: null, newVal: '' });
-      loadMaterials();
-    } else {
-      // Solicita autorização
-      setAdjustToRequest({ id: adjustModal.material.id, val: newVal, name: adjustModal.material.name, oldVal: adjustModal.material.stock });
-      setIsRequestAdjustAuthModalOpen(true);
-      setAdjustModal({ show: false, material: null, newVal: '' });
-    }
+    // PADRÃO: Solicita autorização sempre (Execução via useEffect)
+    setAdjustToRequest({ id: adjustModal.material.id, val: newVal, name: adjustModal.material.name, oldVal: adjustModal.material.stock });
+    setIsRequestAdjustAuthModalOpen(true);
+    setAdjustModal({ show: false, material: null, newVal: '' });
   };
 
   const handleDelete = (material: Material) => {
-    if (currentUser?.permissions.includes(PermissionModule.STOCK_DELETE)) {
-      if (confirm(`Tem certeza que deseja excluir o material "${material.name}"?`)) {
-        db.delete('materials', material.id);
-        db.logAction(companyId, currentUser.id, currentUser.name, 'STOCK_DELETE', `Excluiu material ${material.name}`);
-        loadMaterials();
-      }
-    } else {
-      setDeleteIdToRequest(material.id);
-      setIsRequestDeleteAuthModalOpen(true);
-    }
+    // PADRÃO: Solicita autorização sempre (Execução via useEffect)
+    setDeleteIdToRequest(material.id);
+    setIsRequestDeleteAuthModalOpen(true);
   };
 
   return (
@@ -200,28 +198,45 @@ const Inventory: React.FC = () => {
           <table className="w-full text-left text-sm min-w-[1000px]">
             <thead><tr className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em]"><th className="px-8 py-6">Material & Preço Médio</th><th className="px-8 py-6 text-center">Saldo Real</th><th className="px-8 py-6 text-center">Indicador</th><th className="px-8 py-6 text-right">Ações</th></tr></thead>
             <tbody className="divide-y divide-slate-800">
-              {materials.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase())).map(m => (
-                <tr key={m.id} className="hover:bg-slate-800/20 transition-all group">
-                  <td className="px-8 py-5"><p className="font-black text-slate-200 uppercase tracking-tight text-base truncate">{m.name}</p><p className="text-[10px] text-slate-600 uppercase font-bold mt-1 tracking-widest">Preço: R$ {(m.buy_price || m.buyPrice || 0).toLocaleString()} / {m.unit}</p></td>
-                  <td className={`px-8 py-5 text-center font-black text-lg ${m.stock <= (m.min_stock || m.minStock || 0) ? 'text-brand-error animate-pulse' : 'text-blue-400'}`}>{m.stock.toLocaleString()} <span className="text-xs opacity-40 uppercase">{m.unit}</span></td>
-                  <td className="px-8 py-5"><div className="w-32 h-2.5 bg-slate-900 rounded-full mx-auto overflow-hidden border border-slate-800"><div className={`h-full ${m.stock <= (m.min_stock || m.minStock || 0) ? 'bg-brand-error' : 'bg-blue-400'}`} style={{ width: `${Math.min(100, (m.stock / (m.max_stock || m.maxStock || 1000)) * 100)}%` }}></div></div></td>
-                  <td className="px-8 py-5 text-right">
-                    <div className="flex justify-end gap-3">
-                      <button onClick={() => setAdjustModal({ show: true, material: m, newVal: m.stock.toString() })} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl" title="Ajuste"><Scale size={20} /></button>
-                      <button onClick={() => { setModalMode('view'); setEditingId(m.id); setFormData({ ...m }); setSearchModal(true); }} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl"><Eye size={20} /></button>
-                      <button onClick={() => { setModalMode('edit'); setEditingId(m.id); setFormData({ ...m }); setSearchModal(true); }} className="p-3 bg-brand-success/10 text-brand-success rounded-xl"><Edit2 size={20} /></button>
-                      <button onClick={() => handleDelete(m)} className="p-3 bg-brand-error/10 text-brand-error rounded-xl"><Trash2 size={20} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {materials.filter(m => normalizeText(m.name).includes(normalizeText(searchTerm))).map(m => {
+                const min = m.min_stock || m.minStock || 0;
+                const max = m.max_stock || m.maxStock || 1000;
+                const displayPercent = m.stock < min ? ((m.stock / (min || 1)) - 1) * 100 : (m.stock / (max || 1)) * 100;
+                const stockColorClass = m.stock <= min ? 'text-brand-warning' : (m.stock >= max ? 'text-brand-error' : 'text-brand-success');
+                const stockBgClass = m.stock <= min ? 'bg-brand-warning' : (m.stock >= max ? 'bg-brand-error' : 'bg-brand-success');
+
+                return (
+                  <tr key={m.id} className="hover:bg-slate-800/20 transition-all group">
+                    <td className="px-8 py-5"><p className="font-black text-slate-200 uppercase tracking-tight text-base truncate">{m.name}</p><p className="text-[10px] text-slate-600 uppercase font-bold mt-1 tracking-widest">Preço: R$ {formatCurrency(m.buy_price || m.buyPrice || 0)} / {m.unit}</p></td>
+                    <td className={`px-8 py-5 text-center font-black text-lg ${m.stock <= min ? 'text-brand-warning animate-pulse' : stockColorClass}`}>{m.stock.toLocaleString()} <span className="text-xs opacity-40 uppercase">{m.unit}</span></td>
+                    <td className="px-8 py-5">
+                      <div className="flex flex-col items-center gap-1.5">
+                        <span className={`text-[10px] font-black ${stockColorClass}`}>
+                          {Math.round(displayPercent)}%
+                        </span>
+                        <div className="w-32 h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                          <div className={`h-full transition-all duration-500 ${stockBgClass}`} style={{ width: `${Math.min(100, Math.max(0, (m.stock / max) * 100))}%` }}></div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-5 text-right">
+                      <div className="flex justify-end gap-3">
+                        <button onClick={() => setAdjustModal({ show: true, material: m, newVal: m.stock.toString() })} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl" title="Ajuste"><Scale size={20} /></button>
+                        <button onClick={() => { setModalMode('view'); setEditingId(m.id); setFormData({ ...m }); setSearchModal(true); }} className="p-3 bg-slate-800 text-slate-400 hover:text-white rounded-xl"><Eye size={20} /></button>
+                        <button onClick={() => { setModalMode('edit'); setEditingId(m.id); setFormData({ ...m }); setSearchModal(true); }} className="p-3 bg-brand-success/10 text-brand-success rounded-xl"><Edit2 size={20} /></button>
+                        <button onClick={() => handleDelete(m)} className="p-3 bg-brand-error/10 text-brand-error rounded-xl"><Trash2 size={20} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in duration-300 overflow-y-auto">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in duration-300 overflow-y-auto">
           <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl my-auto border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Package className="text-brand-success" size={24} /> {modalMode === 'create' ? 'Novo Material' : modalMode === 'edit' ? 'Editar Material' : 'Ficha Técnica'}</h2><button onClick={() => setSearchModal(false)} className="p-2 text-slate-500 hover:text-white transition-all"><X size={32} /></button></div>
             <form onSubmit={handleSave} className="p-8 space-y-8">
@@ -246,7 +261,7 @@ const Inventory: React.FC = () => {
 
       {/* MODAL AJUSTE RÁPIDO */}
       {adjustModal.show && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-sm p-8 border-slate-700">
             <h2 className="text-xl font-black text-white uppercase text-center mb-6">Ajustar Saldo</h2>
             <p className="text-[10px] text-slate-500 font-black uppercase text-center mb-2">{adjustModal.material?.name}</p>
@@ -263,19 +278,20 @@ const Inventory: React.FC = () => {
         isOpen={isRequestEditAuthModalOpen}
         onClose={() => setIsRequestEditAuthModalOpen(false)}
         actionKey="EDITAR_MATERIAL"
-        actionLabel={`OP: EDIÇÃO DE MATERIAL | ID: #${editToRequest?.id?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Edição de preços e configurações técnicas do material ${editToRequest?.name || 'MATERIAL'}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editToRequest?.id} | JSON: ${JSON.stringify(editToRequest?.data)}`}
+        onSuccess={() => { setSearchModal(false); setEditingId(null); }}
+        actionLabel={`OP: EDIÇÃO DE MATERIAL | ID: #${editToRequest?.id?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Edição de preços e configurações técnicas do material ${editToRequest?.name || 'MATERIAL'}. | VAL: ${formatCurrency(0)} para ${formatCurrency(0)} | REAL_ID: ${editToRequest?.id} | JSON: ${JSON.stringify(editToRequest?.data)}`}
       />
       <RequestAuthorizationModal
         isOpen={isRequestDeleteAuthModalOpen}
         onClose={() => setIsRequestDeleteAuthModalOpen(false)}
         actionKey="EXCLUIR_MATERIAL"
-        actionLabel={`OP: EXCLUSÃO DE MATERIAL | ID: #${deleteIdToRequest?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Remoção permanente do cadastro do material ${materials.find(m => m.id === deleteIdToRequest)?.name || 'MATERIAL'}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${deleteIdToRequest}`}
+        actionLabel={`OP: EXCLUSÃO DE MATERIAL | ID: #${deleteIdToRequest?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Remoção permanente do cadastro do material ${materials.find(m => m.id === deleteIdToRequest)?.name || 'MATERIAL'}. | VAL: ${formatCurrency(0)} para ${formatCurrency(0)} | REAL_ID: ${deleteIdToRequest}`}
       />
       <RequestAuthorizationModal
         isOpen={isRequestAdjustAuthModalOpen}
         onClose={() => setIsRequestAdjustAuthModalOpen(false)}
         actionKey="AJUSTAR_ESTOQUE"
-        actionLabel={`OP: AJUSTE DE ESTOQUE | ID: #${adjustToRequest?.id?.slice(-5) || '00000'} | CTX: INVENTÁRIO REAL | DET: Correção manual da quantidade em estoque do material ${adjustToRequest?.name || 'MATERIAL'} para igualar ao pátio. | VAL: ${(adjustToRequest?.oldVal || 0).toLocaleString('pt-BR')} para ${(adjustToRequest?.val || 0).toLocaleString('pt-BR')} | REAL_ID: ${adjustToRequest?.id}`}
+        actionLabel={`OP: AJUSTE DE ESTOQUE | ID: #${adjustToRequest?.id?.slice(-5) || '00000'} | CTX: INVENTÁRIO REAL | DET: Correção manual da quantidade em estoque do material ${adjustToRequest?.name || 'MATERIAL'} para igualar ao pátio. | VAL: ${formatCurrency(adjustToRequest?.oldVal)} para ${formatCurrency(adjustToRequest?.val)} | REAL_ID: ${adjustToRequest?.id}`}
       />
     </div>
   );

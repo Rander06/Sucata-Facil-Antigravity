@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db } from '../services/dbService';
 import { useAppContext } from '../store/AppContext';
+import { formatCurrency } from '../utils/currencyHelper';
 import { Company, Plan, PermissionModule, UserRole } from '../types';
 import {
   Building2,
@@ -296,7 +297,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
                 <span className="text-[10px] font-bold text-brand-success bg-brand-success/10 px-2 py-0.5 rounded-full">GLOBAL</span>
               </div>
               <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">MRR Acumulado</p>
-              <h3 className="text-2xl font-black text-brand-success mt-1">R$ {stats.mrr.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
+              <h3 className="text-2xl font-black text-brand-success mt-1">R$ {formatCurrency(stats.mrr)}</h3>
               <div className="w-full bg-slate-800 h-1 mt-4 rounded-full overflow-hidden">
                 <div className="bg-brand-success h-full" style={{ width: '75%' }}></div>
               </div>
@@ -462,7 +463,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
                             <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase w-fit border border-indigo-500/20">
                               {plan?.name || 'CARREGANDO...'}
                             </span>
-                            <span className="text-[9px] text-slate-500 mt-1 uppercase">R$ {plan?.price?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}/mês</span>
+                            <span className="text-[9px] text-slate-500 mt-1 uppercase">R$ {formatCurrency(plan?.price || 0)}/mês</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 w-[15%]">
@@ -537,7 +538,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
                 </div>
                 <div className="flex items-baseline gap-1 my-5">
                   <span className="text-slate-500 text-sm font-bold">R$</span>
-                  <span className="text-4xl font-black text-brand-success">{plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span className="text-4xl font-black text-brand-success">{formatCurrency(plan.price)}</span>
                   <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest ml-1">/ {plan.billing_cycle === 'yearly' ? 'anual' : 'mensal'}</span>
                 </div>
 
@@ -588,7 +589,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
 
       {/* --- MODAL DE GESTÃO DE EMPRESA --- */}
       {companyModal.show && companyModal.data && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto">
           <div className="enterprise-card w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
               <h2 className="text-xl font-bold flex items-center gap-3 text-white">
@@ -632,7 +633,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
                     onChange={e => setCompanyModal({ show: true, data: { ...companyModal.data!, planId: e.target.value, plan_id: e.target.value } })}
                   >
                     {plans.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} - (R$ {p.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} /mês)</option>
+                      <option key={p.id} value={p.id}>{p.name} - (R$ {formatCurrency(p.price)} /mês)</option>
                     ))}
                   </select>
                 </div>
@@ -666,7 +667,7 @@ const SaasAdmin: React.FC<SaasAdminProps> = ({ view }) => {
 
       {/* --- MODAL DE GESTÃO DE PLANOS --- */}
       {planModal.show && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto">
+        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 overflow-y-auto">
           <div className="enterprise-card w-full max-w-4xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
               <h2 className="text-xl font-bold flex items-center gap-3 text-white">

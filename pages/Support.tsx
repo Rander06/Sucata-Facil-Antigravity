@@ -65,41 +65,48 @@ const Support: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-24 md:pb-8 max-w-full overflow-x-hidden">
-      <header className="px-1">
-        <h1 className="text-2xl md:text-3xl font-black flex items-center gap-3 text-white uppercase tracking-tight">
-          <LifeBuoy className="text-brand-success" />
-          Suporte & Segurança
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">Central de ajuda e proteção de dados cloud.</p>
-      </header>
+      {!activeModal && (
+        <div className="space-y-8">
+          <header className="px-1">
+            <h1 className="text-2xl md:text-3xl font-black flex items-center gap-3 text-white uppercase tracking-tight">
+              <LifeBuoy className="text-brand-success" />
+              Suporte & Segurança
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">Central de ajuda e proteção de dados cloud.</p>
+          </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-1">
-        {[
-          { id: 'support', label: 'Canais de Ajuda', icon: MessageSquare, color: 'green', permission: PermissionModule.SUPPORT_HELP_CHANNELS },
-          { id: 'backup', label: 'Segurança & Backup', icon: Database, color: 'blue', permission: PermissionModule.SUPPORT_SECURITY_BACKUP }
-        ]
-          .filter(item =>
-            currentUser?.permissions.includes(item.permission) ||
-            currentUser?.role === UserRole.SUPER_ADMIN ||
-            currentUser?.role === UserRole.COMPANY_ADMIN ||
-            currentUser?.email === 'admin@sucatafacil.com'
-          )
-          .map(item => (
-            <button key={item.id} onClick={() => setActiveModal(item.id as any)} className="enterprise-card p-8 flex items-center gap-6 transition-all group bg-slate-900/40 border-t-4 border-t-slate-800 hover:border-t-brand-success">
-              <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center text-brand-success group-hover:bg-brand-success/10 transition-colors"><item.icon size={32} /></div>
-              <div className="flex-1 text-left"><h3 className="text-white font-black uppercase text-base tracking-widest">{item.label}</h3></div>
-              <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={24} />
-            </button>
-          ))}
-      </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-1">
+            {[
+              { id: 'support', label: 'Canais de Ajuda', description: 'Central de atendimento', icon: MessageSquare, color: 'green', permission: PermissionModule.SUPPORT_HELP_CHANNELS },
+              { id: 'backup', label: 'Segurança & Backup', description: 'Proteção de dados e integridade', icon: Database, color: 'blue', permission: PermissionModule.SUPPORT_SECURITY_BACKUP }
+            ]
+              .filter(item =>
+                currentUser?.permissions.includes(item.permission) ||
+                currentUser?.role === UserRole.SUPER_ADMIN ||
+                currentUser?.role === UserRole.COMPANY_ADMIN ||
+                currentUser?.email === 'admin@sucatafacil.com'
+              )
+              .map(item => (
+                <button key={item.id} onClick={() => setActiveModal(item.id as any)} className={`enterprise-card p-6 md:p-8 flex items-center gap-4 md:gap-6 transition-all group bg-slate-900/40 border-t-4 text-left ${item.color === 'green' ? 'border-t-brand-success shadow-[0_0_15px_-5px_rgba(16,185,129,0.2)] hover:bg-gradient-to-b from-brand-success/10 to-transparent' : 'border-t-blue-500 shadow-[0_0_15px_-5px_rgba(59,130,246,0.2)] hover:bg-gradient-to-b from-blue-500/10 to-transparent'}`}>
+                  <div className={`w-12 md:w-16 h-12 md:h-16 rounded-2xl bg-slate-800 flex items-center justify-center transition-colors border border-slate-700 ${item.color === 'green' ? 'text-brand-success group-hover:bg-brand-success/10' : 'text-blue-500 group-hover:bg-blue-500/10'}`}><item.icon size={28} /></div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-white font-black uppercase text-xs md:text-base tracking-widest group-hover:translate-x-1 transition-transform">{item.label}</h3>
+                    <p className="text-slate-500 text-[9px] md:text-xs mt-1 truncate font-medium">{item.description}</p>
+                  </div>
+                  <ChevronRight className="text-slate-700 group-hover:text-white transition-all group-hover:translate-x-1" size={20} />
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
 
       {activeModal === 'backup' && (
-        <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in">
-          <header className="bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shadow-2xl">
-            <h2 className="text-lg font-black text-white uppercase tracking-widest ml-4 flex items-center gap-3"><Database className="text-blue-500" /> Segurança de Dados</h2>
-            <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl px-4 mr-4 flex items-center gap-2"><span className="text-[10px] font-black uppercase tracking-widest">Fechar</span><X size={20} /></button>
+        <div className="w-full flex flex-col bg-brand-dark animate-in fade-in min-h-full">
+          <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shadow-2xl">
+            <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-widest ml-4 flex items-center gap-3"><Database className="text-blue-500" size={18} /> Segurança de Dados</h2>
+            <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl px-4 flex items-center gap-2"><span className="text-[10px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span><X size={18} /></button>
           </header>
-          <main className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+          <main className="flex-1 overflow-y-auto p-3 md:p-8 custom-scrollbar">
             <div className="max-w-4xl mx-auto space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="enterprise-card p-8 space-y-6">
@@ -122,12 +129,12 @@ const Support: React.FC = () => {
       )}
 
       {activeModal === 'support' && (
-        <div className="fixed inset-0 z-[100] flex flex-col bg-brand-dark animate-in fade-in">
-          <header className="bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shadow-2xl">
-            <h2 className="text-lg font-black text-white uppercase tracking-widest ml-4 flex items-center gap-3"><MessageSquare className="text-brand-success" /> Suporte Técnico</h2>
-            <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl px-4 mr-4 flex items-center gap-2"><span className="text-[10px] font-black uppercase tracking-widest">Fechar</span><X size={20} /></button>
+        <div className="w-full flex flex-col bg-brand-dark animate-in fade-in min-h-full">
+          <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shadow-2xl">
+            <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-widest ml-4 flex items-center gap-3"><MessageSquare className="text-brand-success" size={18} /> Suporte Técnico</h2>
+            <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl px-4 flex items-center gap-2"><span className="text-[10px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span><X size={18} /></button>
           </header>
-          <main className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+          <main className="flex-1 overflow-y-auto p-3 md:p-8 custom-scrollbar">
             <div className="max-w-2xl mx-auto space-y-8 py-12 text-center">
               <div className="w-24 h-24 bg-brand-success/10 rounded-full flex items-center justify-center mx-auto border-2 border-brand-success/20 text-brand-success mb-6"><LifeBuoy size={48} /></div>
               <h3 className="text-3xl font-black text-white uppercase tracking-tighter">Central de Atendimento</h3>
