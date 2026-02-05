@@ -1,7 +1,7 @@
 ﻿import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { FinancialRecord, Partner, PaymentTerm, CashierSession, WalletTransaction, Bank, FinanceCategory, User, PermissionModule, UserRole, OperationalProfile } from '../types';
+import { FinancialRecord, Partner, PaymentTerm, CashierSession, WalletTransaction, Bank, FinanceCategory, User, PermissionModule, UserRole, OperationalProfile, RemoteAuthorization } from '../types';
 import {
   Wallet, Landmark, ArrowUpCircle, ArrowDownCircle, Search, Clock,
   ChevronRight, RefreshCw, ListChecks, CheckCircle2, ShieldCheck,
@@ -915,7 +915,7 @@ const FinanceHub: React.FC = () => {
           if (req.action_key === 'CANCELAR_TRANSACAO_CARTEIRA') {
             const txId = req.action_label.split('ID: ')[1];
             executeDeleteTransaction(txId);
-          } else if (req.action_key === 'LANCAMENTO_MANUAL_CARTEIRA') {
+          } else if (req.action_key === 'LANCAMENTO_MANUAL_CARTEIRA' || req.action_key === 'EDITAR_TRANSACAO_CARTEIRA') {
             const jsonPart = req.action_label.split('JSON: ')[1];
             if (jsonPart) {
               const data = JSON.parse(jsonPart);
@@ -3339,9 +3339,13 @@ const FinanceHub: React.FC = () => {
           setShowWalletManualEntry(false);
           setWalletForm({ tipo: 'ENTRADA', valor: '', categoria: '', parceiro: '', payment_term_id: '', descricao: '', id: '' });
         }}
-        actionKey="LANCAMENTO_MANUAL_CARTEIRA"
-        actionLabel={`Lançamento: ${manualEntryToAuthorize?.descricao} | JSON: ${JSON.stringify(manualEntryToAuthorize)}`}
-        details={`Tipo: ${manualEntryToAuthorize?.tipo} | Valor: R$ ${formatCurrency(manualEntryToAuthorize?.valor || 0)} | Desc: ${manualEntryToAuthorize?.descricao}`}
+        actionKey={manualEntryToAuthorize?.id ? RemoteAuthorization.AUTH_FINANCE_EXTRACT_EDIT : RemoteAuthorization.AUTH_FINANCE_EXTRACT_MANUAL_OUT}
+        actionLabel={manualEntryToAuthorize?.id
+          ? `Solicitação de EDIÇÃO de Transação ID: ${manualEntryToAuthorize.id} | JSON: ${JSON.stringify(manualEntryToAuthorize)}`
+          : `Lançamento: ${manualEntryToAuthorize?.descricao} | JSON: ${JSON.stringify(manualEntryToAuthorize)}`}
+        details={manualEntryToAuthorize?.id
+          ? `EDIÇÃO Transação: ${manualEntryToAuthorize.descricao} | Valor: R$ ${formatCurrency(manualEntryToAuthorize.valor || 0)}`
+          : `Tipo: ${manualEntryToAuthorize?.tipo} | Valor: R$ ${formatCurrency(manualEntryToAuthorize?.valor || 0)} | Desc: ${manualEntryToAuthorize?.descricao}`}
       />
 
       {/* MODAL AUTH REVERSE LIQUIDATION */}

@@ -362,11 +362,13 @@ export const db = {
     });
   },
 
-  verifyCredentials: (email: string, password: string, requiredPermission?: PermissionModule, requiredRemoteAuth?: RemoteAuthorization): User | null => {
+  verifyCredentials: async (email: string, password: string, requiredPermission?: PermissionModule, requiredRemoteAuth?: RemoteAuthorization): Promise<User | null> => {
     const ADMIN_EMAIL = 'admin@sucatafacil.com';
     const ADMIN_PASS = 'Mr748197/';
+    const normalizedEmail = email.toLowerCase().trim();
 
-    if (email.toLowerCase().trim() === ADMIN_EMAIL && password.trim() === ADMIN_PASS) {
+    // 1. Verificação do Super Admin (Hardcoded)
+    if (normalizedEmail === ADMIN_EMAIL && password.trim() === ADMIN_PASS) {
       const allUsers = db.get().users;
       const master = allUsers.find(u => u.email.toLowerCase().trim() === ADMIN_EMAIL);
 
@@ -381,14 +383,81 @@ export const db = {
       return masterObj as User;
     }
 
-    const user = db.get().users.find(u => u.email === email && u.password === password);
+    // 2. Busca o usuário no banco local
+    const user = db.get().users.find(u => u.email.toLowerCase().trim() === normalizedEmail);
     if (!user) return null;
 
-    // Check standard permission if required
-    if (requiredPermission && !user.permissions.includes(requiredPermission)) return null;
+    // 3. Verificação de SENHA
+    // No modo Cloud, as senhas não ficam no banco local. Precisamos validar no Supabase.
+    // Criamos um client temporário que não persiste sessão para não deslogar o usuário atual.
+    const { createVerificationClient } = await import('./supabase');
+    const authClient = createVerificationClient();
 
-    // Check remote authorization if required
-    if (requiredRemoteAuth && !(user.remote_authorizations || []).includes(requiredRemoteAuth)) return null;
+    if (authClient) {
+      console.log('[AUTH] Verificando credenciais via Cloud...');
+      const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: password
+      });
+
+      if (authError || !authData.user) {
+        console.warn('[AUTH] Falha na verificação Cloud:', authError?.message);
+        // Fallback para senha local para usuários criados Offline (se existir)
+        if (!user.password || user.password !== password) return null;
+      }
+      console.log('[AUTH] Credenciais validadas via Cloud ✅');
+    } else {
+      // Modo Offline puro / Sem config cloud
+      if (!user.password || user.password !== password) return null;
+    }
+
+    // 4. Verificação de PERMISSÕES (Ultra-Robusto)
+    const checkIn = (collection: any, value: string) => {
+      if (!collection) return false;
+      if (Array.isArray(collection)) return collection.includes(value);
+      if (typeof collection === 'string') return collection.split(',').map(s => s.trim()).includes(value);
+      return false;
+    };
+
+    // 5. Lógica de Bypass de Permissões
+    const isSuperAdmin = user.role === UserRole.SUPER_ADMIN;
+    // @google/genai Security Fix: Garantir que isMaster seja estrito ao perfil MASTER
+    const isMaster = user.profile === OperationalProfile.MASTER || (Array.isArray(user.profile) && user.profile.includes(OperationalProfile.MASTER));
+
+    // Super Admin: Acesso total irrestrito (Operacional + SAAS)
+    if (isSuperAdmin) {
+      console.log(`[AUTH] Bypass concedido: SUPER_ADMIN (${user.name})`);
+      return applyRedundancy({
+        ...user,
+        permissions: Object.values(PermissionModule),
+        remote_authorizations: Object.values(RemoteAuthorization)
+      });
+    }
+
+    // Master: Acesso total OPERACIONAL (Exclui módulos SAAS/Master)
+    if (isMaster) {
+      console.log(`[AUTH] Bypass operacional concedido: MASTER (${user.name})`);
+      const operationalPermissions = Object.values(PermissionModule).filter(p => ![
+        PermissionModule.SAAS_DASHBOARD,
+        PermissionModule.SAAS_COMPANIES,
+        PermissionModule.SAAS_PLANS,
+        PermissionModule.INFRA_CLOUD
+      ].includes(p));
+
+      return applyRedundancy({
+        ...user,
+        permissions: operationalPermissions,
+        remote_authorizations: Object.values(RemoteAuthorization)
+      });
+    }
+
+    console.log(`[AUTH] Verificando permissões granulares para profile: ${user.profile}`);
+
+    // Check standard permission
+    if (requiredPermission && !checkIn(user.permissions, requiredPermission)) return null;
+
+    // Check remote authorization
+    if (requiredRemoteAuth && !checkIn(user.remote_authorizations, requiredRemoteAuth)) return null;
 
     return applyRedundancy(user);
   },

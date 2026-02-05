@@ -120,12 +120,11 @@ const Users: React.FC = () => {
     e.preventDefault();
     if (!userModal.data) return;
 
-    // Se tiver permissão de edição direta
-    if (currentUser?.permissions.includes(PermissionModule.TEAMS)) {
+    // Se for Super Admin, permite edição direta sem solicitação remota
+    if (isCurrentSuperAdmin) {
       try {
         await db.update('users', userModal.data.id, editFormData);
-        // Se for o próprio usuário, pode ser bom dar um feedback, mas loadData já atualiza a tabela
-        db.logAction(companyId, currentUser.id, currentUser.name, 'TEAM_EDIT', `Editou usuário ${userModal.data.name}`);
+        db.logAction(companyId, currentUser.id, currentUser.name, 'TEAM_EDIT', `Editou usuário ${userModal.data.name} (Bypass Super Admin)`);
         alert('Usuário atualizado com sucesso!');
         setUserModal({ show: false, data: null });
         loadData();
@@ -231,7 +230,6 @@ const Users: React.FC = () => {
                   <th className="px-6 py-4 w-[30%]">Nome / E-mail</th>
                   <th className="px-6 py-4 w-[15%]">Cargo</th>
                   <th className="px-6 py-4 w-[15%] text-center">Status</th>
-                  <th className="px-6 py-4 w-[10%] text-center">Ação</th>
                 </tr>
               </thead>
             </table>
@@ -275,19 +273,11 @@ const Users: React.FC = () => {
                         {invite.status === 'accepted' ? 'Aceito' : 'Pendente'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 w-[10%] text-center">
-                      <button
-                        onClick={() => handleDeleteInvite(invite.id)}
-                        className="p-2 bg-brand-error/10 text-brand-error rounded-lg hover:bg-brand-error/20 transition-all opacity-40 hover:opacity-100"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
                   </tr>
                 ))}
                 {invites.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-600 italic uppercase font-bold text-[10px]">
+                    <td colSpan={5} className="py-12 text-center text-slate-600 italic uppercase font-bold text-[10px]">
                       Nenhum convite pendente localizado
                     </td>
                   </tr>
@@ -421,8 +411,8 @@ const Users: React.FC = () => {
                         { title: 'Parceiros', items: [{ key: RemoteAuthorization.AUTH_PARTNERS_EDIT, label: 'Editar parceiros' }, { key: RemoteAuthorization.AUTH_PARTNERS_DELETE, label: 'Excluir parceiros' }] },
                         { title: 'Equipes', items: [{ key: RemoteAuthorization.AUTH_TEAMS_EDIT, label: 'Editar equipes' }, { key: RemoteAuthorization.AUTH_TEAMS_DELETE, label: 'Excluir equipes' }] },
                         { title: 'Instituição Bancária', items: [{ key: RemoteAuthorization.AUTH_BANKS_EDIT, label: 'Editar instituição' }, { key: RemoteAuthorization.AUTH_BANKS_DELETE, label: 'Excluir instituição' }] },
-                        { title: 'Categorias', items: [{ key: RemoteAuthorization.AUTH_CATEGORIES_EDIT, label: 'Editar categorias' }, { key: RemoteAuthorization.AUTH_CATEGORIES_DELETE, label: 'Excluir categorias' }] },
-                        { title: 'Formas Pagamentos', items: [{ key: RemoteAuthorization.AUTH_TERMS_EDIT, label: 'Editar forma' }, { key: RemoteAuthorization.AUTH_TERMS_DELETE, label: 'Excluir forma' }] }
+                        { title: 'Categorias', items: [{ key: RemoteAuthorization.AUTH_FINANCE_CATEGORY_EDIT, label: 'Editar categorias' }, { key: RemoteAuthorization.AUTH_FINANCE_CATEGORY_DELETE, label: 'Excluir categorias' }] },
+                        { title: 'Formas Pagamentos', items: [{ key: RemoteAuthorization.AUTH_FINANCE_TERM_EDIT, label: 'Editar forma' }, { key: RemoteAuthorization.AUTH_FINANCE_TERM_DELETE, label: 'Excluir forma' }] }
                       ]
                     },
                     {
@@ -461,12 +451,13 @@ const Users: React.FC = () => {
                                       className="hidden"
                                       checked={isSelected}
                                       onChange={() => {
-                                        const currentAuths = editFormData.remote_authorizations || [];
-                                        if (isSelected) {
-                                          setEditFormData({ ...editFormData, remote_authorizations: currentAuths.filter(a => a !== auth.key) });
-                                        } else {
-                                          setEditFormData({ ...editFormData, remote_authorizations: [...currentAuths, auth.key] });
-                                        }
+                                        setEditFormData(prev => {
+                                          const currentAuths = prev.remote_authorizations || [];
+                                          const newAuths = isSelected
+                                            ? currentAuths.filter(a => a !== auth.key)
+                                            : [...currentAuths, auth.key];
+                                          return { ...prev, remote_authorizations: newAuths };
+                                        });
                                       }}
                                     />
                                     <div className={`w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-brand-success border-brand-success text-black' : 'border-slate-600'}`}>
@@ -665,8 +656,8 @@ const Users: React.FC = () => {
                         { title: 'Parceiros', items: [{ key: RemoteAuthorization.AUTH_PARTNERS_EDIT, label: 'Editar parceiros' }, { key: RemoteAuthorization.AUTH_PARTNERS_DELETE, label: 'Excluir parceiros' }] },
                         { title: 'Equipes', items: [{ key: RemoteAuthorization.AUTH_TEAMS_EDIT, label: 'Editar equipes' }, { key: RemoteAuthorization.AUTH_TEAMS_DELETE, label: 'Excluir equipes' }] },
                         { title: 'Instituição Bancária', items: [{ key: RemoteAuthorization.AUTH_BANKS_EDIT, label: 'Editar instituição' }, { key: RemoteAuthorization.AUTH_BANKS_DELETE, label: 'Excluir instituição' }] },
-                        { title: 'Categorias', items: [{ key: RemoteAuthorization.AUTH_CATEGORIES_EDIT, label: 'Editar categorias' }, { key: RemoteAuthorization.AUTH_CATEGORIES_DELETE, label: 'Excluir categorias' }] },
-                        { title: 'Formas Pagamentos', items: [{ key: RemoteAuthorization.AUTH_TERMS_EDIT, label: 'Editar forma' }, { key: RemoteAuthorization.AUTH_TERMS_DELETE, label: 'Excluir forma' }] }
+                        { title: 'Categorias', items: [{ key: RemoteAuthorization.AUTH_FINANCE_CATEGORY_EDIT, label: 'Editar categorias' }, { key: RemoteAuthorization.AUTH_FINANCE_CATEGORY_DELETE, label: 'Excluir categorias' }] },
+                        { title: 'Formas Pagamentos', items: [{ key: RemoteAuthorization.AUTH_FINANCE_TERM_EDIT, label: 'Editar forma' }, { key: RemoteAuthorization.AUTH_FINANCE_TERM_DELETE, label: 'Excluir forma' }] }
                       ]
                     },
                     {
@@ -705,11 +696,13 @@ const Users: React.FC = () => {
                                       className="hidden"
                                       checked={isSelected}
                                       onChange={() => {
-                                        if (isSelected) {
-                                          setInviteForm(prev => ({ ...prev, remote_authorizations: prev.remote_authorizations.filter(a => a !== auth.key) }));
-                                        } else {
-                                          setInviteForm(prev => ({ ...prev, remote_authorizations: [...prev.remote_authorizations, auth.key] }));
-                                        }
+                                        setInviteForm(prev => {
+                                          const currentAuths = prev.remote_authorizations || [];
+                                          const newAuths = isSelected
+                                            ? currentAuths.filter(a => a !== auth.key)
+                                            : [...currentAuths, auth.key];
+                                          return { ...prev, remote_authorizations: newAuths };
+                                        });
                                       }}
                                     />
                                     <div className={`w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-brand-success border-brand-success text-black' : 'border-slate-600'}`}>

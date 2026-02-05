@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { Material, PermissionModule, AuthorizationRequest } from '../types';
+import { Material, PermissionModule, AuthorizationRequest, RemoteAuthorization } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import { normalizeText } from '../utils/textHelper';
 import { formatCurrency } from '../utils/currencyHelper';
@@ -60,7 +60,7 @@ const Inventory: React.FC = () => {
       r.status === 'APPROVED' && r.action_key === key && r.requested_by_id === currentUser.id
     ).sort((a, b) => new Date(b.responded_at || 0).getTime() - new Date(a.responded_at || 0).getTime())[0];
 
-    const approvedEdit = findApproved('EDITAR_MATERIAL');
+    const approvedEdit = findApproved(RemoteAuthorization.AUTH_ESTOQUE_EDIT);
     if (approvedEdit) {
       db.update('authorization_requests' as any, approvedEdit.id, { status: 'PROCESSED' } as any);
       const parts = approvedEdit.action_label.split('REAL_ID: ');
@@ -73,7 +73,7 @@ const Inventory: React.FC = () => {
       }
     }
 
-    const approvedDelete = findApproved('EXCLUIR_MATERIAL');
+    const approvedDelete = findApproved(RemoteAuthorization.AUTH_ESTOQUE_DELETE);
     if (approvedDelete) {
       db.update('authorization_requests' as any, approvedDelete.id, { status: 'PROCESSED' } as any);
       const parts = approvedDelete.action_label.split('REAL_ID: ');
@@ -85,7 +85,7 @@ const Inventory: React.FC = () => {
       }
     }
 
-    const approvedAdjust = findApproved('AJUSTAR_ESTOQUE');
+    const approvedAdjust = findApproved(RemoteAuthorization.AUTH_ESTOQUE_ADJUST);
     if (approvedAdjust) {
       db.update('authorization_requests' as any, approvedAdjust.id, { status: 'PROCESSED' } as any);
 
@@ -279,20 +279,20 @@ const Inventory: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestEditAuthModalOpen}
         onClose={() => setIsRequestEditAuthModalOpen(false)}
-        actionKey="EDITAR_MATERIAL"
+        actionKey={RemoteAuthorization.AUTH_ESTOQUE_EDIT}
         onSuccess={() => { setSearchModal(false); setEditingId(null); }}
         actionLabel={`OP: EDIÇÃO DE MATERIAL | ID: #${editToRequest?.id?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Edição de preços e configurações técnicas do material ${editToRequest?.name || 'MATERIAL'}. | VAL: ${formatCurrency(0)} para ${formatCurrency(0)} | REAL_ID: ${editToRequest?.id} | JSON: ${JSON.stringify(editToRequest?.data)}`}
       />
       <RequestAuthorizationModal
         isOpen={isRequestDeleteAuthModalOpen}
         onClose={() => setIsRequestDeleteAuthModalOpen(false)}
-        actionKey="EXCLUIR_MATERIAL"
+        actionKey={RemoteAuthorization.AUTH_ESTOQUE_DELETE}
         actionLabel={`OP: EXCLUSÃO DE MATERIAL | ID: #${deleteIdToRequest?.slice(-5) || '00000'} | CTX: ESTOQUE CENTRAL | DET: Remoção permanente do cadastro do material ${materials.find(m => m.id === deleteIdToRequest)?.name || 'MATERIAL'}. | VAL: ${formatCurrency(0)} para ${formatCurrency(0)} | REAL_ID: ${deleteIdToRequest}`}
       />
       <RequestAuthorizationModal
         isOpen={isRequestAdjustAuthModalOpen}
         onClose={() => setIsRequestAdjustAuthModalOpen(false)}
-        actionKey="AJUSTAR_ESTOQUE"
+        actionKey={RemoteAuthorization.AUTH_ESTOQUE_ADJUST}
         actionLabel={`OP: AJUSTE DE ESTOQUE | ID: #${adjustToRequest?.id?.slice(-5) || '00000'} | CTX: INVENTÁRIO REAL | DET: Correção manual da quantidade em estoque do material ${adjustToRequest?.name || 'MATERIAL'} para igualar ao pátio. | VAL: ${formatCurrency(adjustToRequest?.oldVal)} para ${formatCurrency(adjustToRequest?.val)} | REAL_ID: ${adjustToRequest?.id}`}
       />
     </div>

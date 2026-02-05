@@ -69,16 +69,15 @@ Valor envolvido: ${val}`;
 
       let manager = null;
       if (isRemoteAuth) {
-        manager = db.verifyCredentials(email, password, undefined, requiredAuth);
-      }
-
-      if (!manager) {
-        manager = db.verifyCredentials(email, password, PermissionModule.TEAMS);
+        manager = await db.verifyCredentials(email, password, undefined, requiredAuth);
+      } else {
+        // O fallback para PermissionModule.TEAMS agora só acontece para ações que NÃO são autorizações remotas
+        manager = await db.verifyCredentials(email, password, PermissionModule.TEAMS);
       }
 
       if (!manager) {
         setError(isRemoteAuth
-          ? 'Credenciais inválidas ou sem autorização para esta ação.'
+          ? 'Credenciais inválidas ou sem autorização específica para esta ação.'
           : 'Credenciais de gestor inválidas ou sem permissão de edição.');
         setIsProcessing(false);
         return;
@@ -103,15 +102,13 @@ Valor envolvido: ${val}`;
 
       let manager = null;
       if (isRemoteAuth) {
-        manager = db.verifyCredentials(email, password, undefined, requiredAuth);
+        manager = await db.verifyCredentials(email, password, undefined, requiredAuth);
+      } else {
+        manager = await db.verifyCredentials(email, password, PermissionModule.TEAMS);
       }
 
       if (!manager) {
-        manager = db.verifyCredentials(email, password, PermissionModule.TEAMS);
-      }
-
-      if (!manager) {
-        setError('Credenciais inválidas.');
+        setError('Credenciais inválidas ou sem permissão para negar.');
         setIsProcessing(false);
         return;
       }

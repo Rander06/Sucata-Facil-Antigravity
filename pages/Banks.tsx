@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { Bank, PermissionModule, AuthorizationRequest } from '../types';
+import { Bank, PermissionModule, AuthorizationRequest, RemoteAuthorization } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import {
   Landmark,
@@ -52,7 +52,7 @@ const Banks: React.FC = () => {
     if (!currentUser) return;
     const findApproved = (key: string) => db.query<AuthorizationRequest>('authorization_requests' as any, r => r.status === 'APPROVED' && r.action_key === key && r.requested_by_id === currentUser.id).sort((a, b) => new Date(b.responded_at || 0).getTime() - new Date(a.responded_at || 0).getTime())[0];
 
-    const approvedEdit = findApproved('EDITAR_BANCO');
+    const approvedEdit = findApproved(RemoteAuthorization.AUTH_BANKS_EDIT);
     if (approvedEdit) {
       db.update('authorization_requests' as any, approvedEdit.id, { status: 'PROCESSED' } as any);
       const id = approvedEdit.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
@@ -61,7 +61,7 @@ const Banks: React.FC = () => {
         db.update('banks', id, JSON.parse(dataRaw)); loadBanks(); setShowModal(false); setEditingId(null);
       }
     }
-    const approvedDelete = findApproved('EXCLUIR_BANCO');
+    const approvedDelete = findApproved(RemoteAuthorization.AUTH_BANKS_DELETE);
     if (approvedDelete) {
       db.update('authorization_requests' as any, approvedDelete.id, { status: 'PROCESSED' } as any);
       const id = approvedDelete.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
@@ -75,7 +75,7 @@ const Banks: React.FC = () => {
     e.preventDefault();
     if (editingId) {
       setAuthRequestData({
-        key: 'EDITAR_BANCO',
+        key: RemoteAuthorization.AUTH_BANKS_EDIT,
         label: `OP: EDIÇÃO DE CONTA | ID: #${editingId.slice(-5)} | CTX: GESTÃO DE CONTAS | DET: Ajuste nas informações da conta bancária ${formData.name} para conciliação bancária. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingId} | JSON: ${JSON.stringify(formData)}`
       });
       setIsRequestAuthModalOpen(true);
@@ -111,7 +111,7 @@ const Banks: React.FC = () => {
                       <button onClick={() => { setEditingId(b.id); setFormData({ ...b }); setShowModal(true); }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white transition-colors"><Edit2 size={16} /></button>
                       <button onClick={() => {
                         setAuthRequestData({
-                          key: 'EXCLUIR_BANCO',
+                          key: RemoteAuthorization.AUTH_BANKS_DELETE,
                           label: `OP: EXCLUSÃO DE BANCO | ID: #${b.id.slice(-5)} | CTX: GESTÃO DE CONTAS | DET: Remoção permanente da conta bancária ${b.name} da estrutura da empresa. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${b.id}`
                         });
                         setIsRequestAuthModalOpen(true);

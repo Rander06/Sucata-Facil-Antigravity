@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { PaymentTerm, FinanceCategory, PermissionModule, AuthorizationRequest } from '../types';
+import { PaymentTerm, FinanceCategory, PermissionModule, AuthorizationRequest, RemoteAuthorization } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import {
   Plus,
@@ -93,20 +93,20 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
         for (const req of approvedToProcess) {
           try {
             processedIdsRef.current.add(req.id);
-            if (req.action_key === 'EXCLUIR_PRAZO_COMERCIAL') {
+            if (req.action_key === RemoteAuthorization.AUTH_FINANCE_TERM_DELETE) {
               const id = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
               if (id) { await db.delete('paymentTerms', id); needsRefresh = true; }
             }
-            else if (req.action_key === 'EXCLUIR_CATEGORIA_FINANCEIRA') {
+            else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_CATEGORY_DELETE) {
               const id = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
               if (id) { await db.delete('financeCategories', id); needsRefresh = true; }
             }
-            else if (req.action_key === 'EDITAR_PRAZO_COMERCIAL') {
+            else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_TERM_EDIT) {
               const id = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
               const dataRaw = req.action_label.split('JSON: ')[1]?.trim();
               if (id && dataRaw) { await db.update('paymentTerms', id, JSON.parse(dataRaw)); needsRefresh = true; }
             }
-            else if (req.action_key === 'EDITAR_CATEGORIA_FINANCEIRA') {
+            else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_CATEGORY_EDIT) {
               const id = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
               const dataRaw = req.action_label.split('JSON: ')[1]?.trim();
               if (id && dataRaw) { await db.update('financeCategories', id, JSON.parse(dataRaw)); needsRefresh = true; }
@@ -149,7 +149,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
         });
         if (!hasChanges) return setShowTermModal(false);
         setAuthRequestData({
-          key: 'EDITAR_PRAZO_COMERCIAL',
+          key: RemoteAuthorization.AUTH_FINANCE_TERM_EDIT,
           label: `OP: EDIÇÃO DE PRAZO | ID: #${editingId.slice(-5)} | CTX: FINANCEIRO ESTRUTURAL | DET: Alteração das condições de vencimento e parcelamento do prazo ${original.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingId} | JSON: ${JSON.stringify(delta)}`
         });
         setIsRequestAuthModalOpen(true); setShowTermModal(false);
@@ -179,7 +179,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
         });
         if (!hasChanges) return setShowCategoryModal(false);
         setAuthRequestData({
-          key: 'EDITAR_CATEGORIA_FINANCEIRA',
+          key: RemoteAuthorization.AUTH_FINANCE_CATEGORY_EDIT,
           label: `OP: EDIÇÃO DE CATEGORIA | ID: #${editingCategoryId.slice(-5)} | CTX: PLANO DE CONTAS | DET: Alteração na classificação e finalidade da categoria ${original.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${editingCategoryId} | JSON: ${JSON.stringify(delta)}`
         });
         setIsRequestAuthModalOpen(true); setShowCategoryModal(false);
@@ -241,7 +241,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
                     }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white"><Edit2 size={16} /></button>
                     <button onClick={() => {
                       setAuthRequestData({
-                        key: 'EXCLUIR_PRAZO_COMERCIAL',
+                        key: RemoteAuthorization.AUTH_FINANCE_TERM_DELETE,
                         label: `OP: EXCLUSÃO DE PRAZO | ID: #${term.id.slice(-5)} | CTX: FINANCEIRO ESTRUTURAL | DET: Desativação permanente do prazo comercial ${term.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${term.id}`
                       });
                       setIsRequestAuthModalOpen(true);
@@ -302,7 +302,7 @@ const Finance: React.FC<FinanceProps> = ({ mode = 'terms_only' }) => {
                     }} className="p-2.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white"><Edit2 size={16} /></button>
                     <button onClick={() => {
                       setAuthRequestData({
-                        key: 'EXCLUIR_CATEGORIA_FINANCEIRA',
+                        key: RemoteAuthorization.AUTH_FINANCE_CATEGORY_DELETE,
                         label: `OP: EXCLUSÃO DE CATEGORIA | ID: #${cat.id.slice(-5)} | CTX: PLANO DE CONTAS | DET: Remoção definitiva da categoria ${cat.name}. | VAL: R$ 0,00 para R$ 0,00 | REAL_ID: ${cat.id}`
                       });
                       setIsRequestAuthModalOpen(true);
