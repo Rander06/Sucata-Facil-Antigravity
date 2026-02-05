@@ -53,12 +53,12 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
     { id: 'saas-dashboard', label: 'Dashboard Master', icon: LayoutDashboard, category: 'MASTER', permission: PermissionModule.SAAS_DASHBOARD },
     { id: 'saas-companies', label: 'Gerenciar Empresas', icon: Building2, category: 'MASTER', permission: PermissionModule.SAAS_COMPANIES },
     { id: 'saas-plans', label: 'Modelos de Planos', icon: Lock, category: 'MASTER', permission: PermissionModule.SAAS_PLANS },
-    { id: 'cloud-config', label: 'Infraestrutura Cloud', icon: Cloud, category: 'MASTER', permission: PermissionModule.SAAS_DASHBOARD },
+    { id: 'cloud-config', label: 'Infraestrutura Cloud', icon: Cloud, category: 'MASTER', permission: PermissionModule.INFRA_CLOUD },
 
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, category: 'OPERACIONAL', permission: PermissionModule.DASHBOARD },
     { id: 'registration', label: 'Cadastro', icon: ClipboardList, category: 'OPERACIONAL', permission: 'ANY_REGISTRATION' },
-    { id: 'finance-hub', label: 'Financeiro', icon: Wallet, category: 'OPERACIONAL', permission: PermissionModule.FINANCE_VIEW },
-    { id: 'pos', label: 'Compra / Venda', icon: ShoppingCart, category: 'OPERACIONAL', permission: PermissionModule.PURCHASES_VIEW },
+    { id: 'finance-hub', label: 'Financeiro', icon: Wallet, category: 'OPERACIONAL', permission: PermissionModule.FINANCE_EXTRACT },
+    { id: 'pos', label: 'Compra / Venda', icon: ShoppingCart, category: 'OPERACIONAL', permission: PermissionModule.SALES_PDV },
     { id: 'reports', label: 'Relatórios', icon: BarChart3, category: 'OPERACIONAL', permission: PermissionModule.REPORTS_VIEW },
     { id: 'support', label: 'Suporte & Backup', icon: LifeBuoy, category: 'OPERACIONAL', permission: PermissionModule.SUPPORT_VIEW },
   ];
@@ -78,15 +78,17 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
 
     if (item.id === 'registration') {
       const registrationPermissions = [
-        PermissionModule.STOCK_VIEW,
-        PermissionModule.PARTNERS_VIEW,
-        PermissionModule.TEAM_VIEW,
-        PermissionModule.FINANCE_VIEW
+        PermissionModule.STOCK,
+        PermissionModule.PARTNERS,
+        PermissionModule.TEAMS,
+        PermissionModule.BANKS,
+        PermissionModule.FINANCE_CATEGORIES,
+        PermissionModule.COMMERCIAL_TERMS
       ];
       return registrationPermissions.some(p => currentUser.permissions.includes(p));
     }
     if (item.id === 'pos') {
-      return currentUser.permissions.includes(PermissionModule.PURCHASES_VIEW) || currentUser.permissions.includes(PermissionModule.SALES_VIEW);
+      return currentUser.permissions.includes(PermissionModule.PURCHASES_PDV) || currentUser.permissions.includes(PermissionModule.SALES_PDV);
     }
     if (item.id === 'reports') {
       const reportPermissions = [
@@ -103,13 +105,9 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage }) 
 
     if (item.id === 'finance-hub') {
       return (
-        currentUser.permissions.includes(PermissionModule.FINANCE_VIEW) ||
         currentUser.permissions.includes(PermissionModule.FINANCE_LIQUIDATE) ||
         currentUser.permissions.includes(PermissionModule.FINANCE_AUDIT) ||
-        currentUser.permissions.includes(PermissionModule.FINANCE_EXTRACT) ||
-        currentUser.permissions.includes(PermissionModule.FINANCE_CREATE) ||
-        currentUser.permissions.includes(PermissionModule.FINANCE_EDIT) ||
-        currentUser.permissions.includes(PermissionModule.FINANCE_DELETE)
+        currentUser.permissions.includes(PermissionModule.FINANCE_EXTRACT)
       );
     }
     return currentUser.permissions.includes(item.permission as PermissionModule);

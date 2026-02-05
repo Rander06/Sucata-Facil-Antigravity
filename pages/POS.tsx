@@ -1114,10 +1114,10 @@ const POS: React.FC = () => {
           <div className="flex-1 space-y-6">
             <div className="enterprise-card p-4 flex flex-col md:flex-row gap-4 items-center">
               <div className="flex bg-brand-dark p-1 rounded-xl border border-slate-800 w-full md:w-auto">
-                {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.PURCHASES_VIEW)) && (
+                {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile?.includes(OperationalProfile.MASTER) || currentUser?.permissions.includes(PermissionModule.PURCHASES_PDV)) && (
                   <button onClick={() => { if (!editingRecordId) { setType('buy'); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'buy' ? 'bg-brand-warning text-white' : 'text-slate-500'}`}>Compra</button>
                 )}
-                {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile === OperationalProfile.MASTER || currentUser?.permissions.includes(PermissionModule.SALES_VIEW)) && (
+                {(currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.profile?.includes(OperationalProfile.MASTER) || currentUser?.permissions.includes(PermissionModule.SALES_PDV)) && (
                   <button onClick={() => { if (!editingRecordId) { setType('sell'); } }} className={`flex-1 md:px-8 py-2.5 rounded-lg text-[10px] font-black uppercase transition-all ${type === 'sell' ? 'bg-brand-success text-white' : 'text-slate-500'}`}>Venda</button>
                 )}
               </div>
@@ -1806,6 +1806,12 @@ const POS: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestEditRecordAuthModalOpen}
         onClose={() => setIsRequestEditRecordAuthModalOpen(false)}
+        onSuccess={() => {
+          setEditingRecordId(null);
+          setCart([]);
+          setIsHistoryModalOpen(false);
+          setEditRecordToRequest(null);
+        }}
         actionKey="EDITAR_LANCAMENTO"
         actionLabel={editRecordToRequest ? `REAL_ID: ${editRecordToRequest.recordId} | JSON: ${JSON.stringify(editRecordToRequest.data)}` : ''}
       />
@@ -1834,6 +1840,10 @@ const POS: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestDeleteAuthModalOpen}
         onClose={() => setIsRequestDeleteAuthModalOpen(false)}
+        onSuccess={() => {
+          setPendingDeleteRecordId(null);
+          setIsHistoryModalOpen(false);
+        }}
         actionKey="CANCELAR_LANCAMENTO"
         actionLabel={pendingDeleteRecordId ? `REAL_ID: ${pendingDeleteRecordId}` : ''}
       />

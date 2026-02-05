@@ -1,4 +1,4 @@
-import { PermissionModule, UserRole, OperationalProfile, User, ActionLog, PaymentTerm, FinanceCategory, CashierSession, FinancialRecord, Backup, WalletTransaction, Bank, AuthorizationRequest } from '../types';
+import { PermissionModule, UserRole, OperationalProfile, User, ActionLog, PaymentTerm, FinanceCategory, CashierSession, FinancialRecord, Backup, WalletTransaction, Bank, AuthorizationRequest, RemoteAuthorization } from '../types';
 import { createSupabaseClient } from './supabase';
 
 import { generateUUID } from '../utils/uuid';
@@ -140,8 +140,8 @@ const NOMENCLATURE_MAP: Record<string, string> = {
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
-  users: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'created_at'],
-  profiles: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'created_at'],
+  users: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'remote_authorizations', 'created_at'],
+  profiles: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'remote_authorizations', 'created_at'],
   financials: ['id', 'company_id', 'user_id', 'tipo', 'natureza', 'categoria', 'valor', 'status', 'description', 'due_date', 'parceiro_id', 'transaction_id', 'caixa_id', 'payment_term_id', 'liquidation_date', 'forma_pagamento', 'created_at', 'updated_at'],
   transactions: ['id', 'company_id', 'user_id', 'valor', 'status', 'natureza', 'tipo', 'items', 'created_at'],
   materials: ['id', 'company_id', 'name', 'unit', 'stock', 'min_stock', 'max_stock', 'buy_price', 'sell_price', 'created_at', 'updated_at'],
@@ -152,7 +152,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
   financeCategories: ['id', 'company_id', 'user_id', 'name', 'type', 'is_default', 'show_in_sales', 'show_in_purchases', 'show_in_liquidation', 'show_in_bank_manual', 'show_in_pdv_manual', 'show_in_title_launch', 'created_at', 'updated_at'],
   banks: ['id', 'company_id', 'user_id', 'name', 'code', 'agency', 'account', 'status', 'is_default', 'created_at', 'updated_at'],
   logs: ['id', 'company_id', 'user_id', 'user_name', 'action', 'details', 'created_at'],
-  invites: ['id', 'company_id', 'user_id', 'code', 'name', 'email', 'profile', 'permissions', 'status', 'created_by', 'created_at', 'updated_at'],
+  invites: ['id', 'company_id', 'user_id', 'code', 'name', 'email', 'profile', 'permissions', 'remote_authorizations', 'status', 'created_by', 'created_at', 'updated_at'],
   companies: ['id', 'name', 'cnpj', 'plan_id', 'status', 'expires_at', 'created_at'],
   plans: ['id', 'name', 'price', 'max_users', 'modules', 'billing_cycle', 'is_active', 'created_at'],
   authorization_requests: ['id', 'company_id', 'action_key', 'action_label', 'action_payload', 'requested_by_id', 'requested_by_name', 'protocol_id', 'approval_code', 'status', 'created_at', 'responded_at', 'responded_by_id', 'responded_by_name']
@@ -362,7 +362,7 @@ export const db = {
     });
   },
 
-  verifyCredentials: (email: string, password: string, requiredPermission?: PermissionModule): User | null => {
+  verifyCredentials: (email: string, password: string, requiredPermission?: PermissionModule, requiredRemoteAuth?: RemoteAuthorization): User | null => {
     const ADMIN_EMAIL = 'admin@sucatafacil.com';
     const ADMIN_PASS = 'Mr748197/';
 
@@ -375,14 +375,21 @@ export const db = {
         role: UserRole.SUPER_ADMIN,
         profile: OperationalProfile.MASTER,
         company_id: '1b8967ab-fb43-452d-8061-afc03bd3e15e',
-        permissions: Object.values(PermissionModule)
+        permissions: Object.values(PermissionModule),
+        remote_authorizations: Object.values(RemoteAuthorization)
       });
       return masterObj as User;
     }
 
     const user = db.get().users.find(u => u.email === email && u.password === password);
     if (!user) return null;
+
+    // Check standard permission if required
     if (requiredPermission && !user.permissions.includes(requiredPermission)) return null;
+
+    // Check remote authorization if required
+    if (requiredRemoteAuth && !(user.remote_authorizations || []).includes(requiredRemoteAuth)) return null;
+
     return applyRedundancy(user);
   },
 

@@ -149,7 +149,7 @@ const Inventory: React.FC = () => {
 
     } else {
       // CREATE MODE
-      if (!isMaster && !currentUser?.permissions.includes(PermissionModule.STOCK_CREATE)) {
+      if (!isMaster && !currentUser?.permissions.includes(PermissionModule.STOCK)) {
         alert("Você não tem permissão para cadastrar novos materiais.");
         return;
       }
@@ -238,10 +238,10 @@ const Inventory: React.FC = () => {
       </div>
 
       {showModal && (
-        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in duration-300 overflow-y-auto">
-          <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl my-auto border-slate-700">
+        <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in duration-300">
+          <div className="enterprise-card w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl my-auto border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Package className="text-brand-success" size={24} /> {modalMode === 'create' ? 'Novo Material' : modalMode === 'edit' ? 'Editar Material' : 'Ficha Técnica'}</h2><button onClick={() => setSearchModal(false)} className="p-2 text-slate-500 hover:text-white transition-all"><X size={32} /></button></div>
-            <form onSubmit={handleSave} className="p-8 space-y-8">
+            <form onSubmit={handleSave} className="p-8 pb-24 space-y-8">
               <div className="space-y-3"><label htmlFor="material-name" className="text-xs font-black text-slate-500 uppercase tracking-widest">Nome do Material</label><input required disabled={modalMode === 'view'} id="material-name" name="name" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value.toUpperCase() })} placeholder="Ex: Cobre Mel" /></div>
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-3"><label htmlFor="material-unit" className="text-xs font-black text-slate-500 uppercase tracking-widest">Unidade</label><select disabled={modalMode === 'view'} id="material-unit" name="unit" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value as any })}><option value="KG">QUILOGRAMA (KG)</option><option value="UN">UNIDADE (UN)</option></select></div>
@@ -263,7 +263,7 @@ const Inventory: React.FC = () => {
 
       {/* MODAL AJUSTE RÁPIDO */}
       {adjustModal.show && (
-        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
+        <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/98 p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-sm p-8 border-slate-700">
             <h2 className="text-xl font-black text-white uppercase text-center mb-6">Ajustar Saldo</h2>
             <p className="text-[10px] text-slate-500 font-black uppercase text-center mb-2">{adjustModal.material?.name}</p>

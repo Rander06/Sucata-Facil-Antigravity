@@ -1,7 +1,7 @@
 ﻿import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { FinancialRecord, Partner, PaymentTerm, CashierSession, WalletTransaction, Bank, FinanceCategory, User, PermissionModule, UserRole } from '../types';
+import { FinancialRecord, Partner, PaymentTerm, CashierSession, WalletTransaction, Bank, FinanceCategory, User, PermissionModule, UserRole, OperationalProfile } from '../types';
 import {
   Wallet, Landmark, ArrowUpCircle, ArrowDownCircle, Search, Clock,
   ChevronRight, RefreshCw, ListChecks, CheckCircle2, ShieldCheck,
@@ -246,6 +246,9 @@ const FinanceHub: React.FC = () => {
   const [closingBreakdown, setClosingBreakdown] = useState<Record<string, string>>({});
   const [operationalTime, setOperationalTime] = useState('');
   const [isClosingShift, setIsClosingShift] = useState(false);
+  const [isRequestCloseAuthModalOpen, setIsRequestCloseAuthModalOpen] = useState(false);
+  const [pendingClosePayload, setPendingClosePayload] = useState<any>(null);
+  const [pendingCloseSessionId, setPendingCloseSessionId] = useState('');
   const closingFormRef = useRef<HTMLFormElement>(null);
 
   // EFICIENTE: Mantém o cronômetro do turno ativo
@@ -442,17 +445,38 @@ const FinanceHub: React.FC = () => {
     setIsClosingModalOpen(true);
   };
 
+  const executeFinalCloseFinanceShift = async (payload: any, sessionId: string) => {
+    setIsClosingShift(true);
+    try {
+      await db.update<CashierSession>('cashierSessions', sessionId, {
+        ...payload,
+        status: 'closed',
+        closingTime: db.getNowISO(),
+        closing_time: db.getNowISO()
+      });
+
+      setActiveFinanceSession(null);
+      setIsClosingModalOpen(false);
+      setPendingClosePayload(null);
+      setPendingCloseSessionId('');
+      alert("Turno Financeiro encerrado com sucesso! Aguardando conferência do gestor.");
+      triggerRefresh();
+    } catch (err: any) {
+      alert("Erro ao encerrar turno: " + err.message);
+    } finally {
+      setIsClosingShift(false);
+    }
+  };
+
   const handleFinalCloseFinanceShift = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeFinanceSession) return;
-    setIsClosingShift(true);
 
     try {
       const physical: Record<string, number> = {};
       dynamicClosingItems.forEach(item => { physical[item.id] = parseNumericString(closingBreakdown[item.id] || '0'); });
       const totalFisico = (physical['physical_cash'] || 0) + (physical['physical_check'] || 0);
 
-      // Usar a mesma lógica de Valor Real da auditoria para persistir o esperado
       const sessionRecords = allFinancialRecords.filter(r => r.caixa_id === activeFinanceSession.id && r.status !== 'reversed' && r.categoria !== 'Abertura de Caixa');
       const cashIn = sessionRecords.filter(r => {
         const tId = r.payment_term_id || r.paymentTermId;
@@ -473,26 +497,26 @@ const FinanceHub: React.FC = () => {
       const opening = activeFinanceSession.openingBalance || activeFinanceSession.opening_balance || 0;
       const expectedTotal = opening + (cashIn + checkIn) - cashOut;
 
-      await db.update<CashierSession>('cashierSessions', activeFinanceSession.id, {
-        status: 'closed',
+      const payload = {
         closingBalance: totalFisico,
         expectedBalance: expectedTotal,
         difference: totalFisico - expectedTotal,
-        closingTime: db.getNowISO(),
         physicalBreakdown: physical as any,
         closing_balance: totalFisico,
         expected_balance: expectedTotal,
-        closing_time: db.getNowISO()
-      });
+      };
 
-      setActiveFinanceSession(null);
-      setIsClosingModalOpen(false);
-      alert("Turno Financeiro encerrado com sucesso! Aguardando conferência do gestor.");
-      triggerRefresh();
+      // REGRA: SE NÃO FOR ADMIN/GESTOR, PEDE AUTORIZAÇÃO
+      if (currentUser?.role !== UserRole.COMPANY_ADMIN && currentUser?.role !== UserRole.SUPER_ADMIN) {
+        setPendingClosePayload(payload);
+        setPendingCloseSessionId(activeFinanceSession.id);
+        setIsRequestCloseAuthModalOpen(true);
+        return;
+      }
+
+      await executeFinalCloseFinanceShift(payload, activeFinanceSession.id);
     } catch (err: any) {
-      alert("Erro ao encerrar turno: " + err.message);
-    } finally {
-      setIsClosingShift(false);
+      alert("Erro ao validar encerramento: " + err.message);
     }
   };
 
@@ -3358,6 +3382,19 @@ const FinanceHub: React.FC = () => {
         actionKey="EXCLUIR_LIQUIDACAO"
         actionLabel={`Solicitação para EXCLUIR Lançamento Manual ID: ${recordToDelete?.id}`}
         details={`Lançamento: ${recordToDelete?.description} | Valor: R$ ${formatCurrency(recordToDelete?.valor)} | Vencimento: ${recordToDelete?.due_date ? formatBRDate(recordToDelete.due_date) : 'N/A'}`}
+      />
+
+      {/* MODAL AUTH CLOSE FINANCE CASHIER */}
+      <RequestAuthorizationModal
+        isOpen={isRequestCloseAuthModalOpen}
+        onClose={() => setIsRequestCloseAuthModalOpen(false)}
+        actionKey="FECHAR_CAIXA_FINANCEIRO"
+        actionLabel={pendingClosePayload ? `ENCERRAMENTO FINANCEIRO ID: ${pendingCloseSessionId} | FISICO: R$ ${formatCurrency(pendingClosePayload.closingBalance)} | ESPERADO: R$ ${formatCurrency(pendingClosePayload.expectedBalance)}` : ''}
+        onSuccess={() => {
+          if (pendingClosePayload && pendingCloseSessionId) {
+            executeFinalCloseFinanceShift(pendingClosePayload, pendingCloseSessionId);
+          }
+        }}
       />
     </div >
   );

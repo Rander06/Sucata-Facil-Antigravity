@@ -13,8 +13,8 @@ interface RequestAuthorizationModalProps {
 
 const RequestAuthorizationModal: React.FC<RequestAuthorizationModalProps> = ({ isOpen, onClose, onSuccess, actionKey, actionLabel }) => {
   const { currentUser, pendingRequests } = useAppContext();
-  
-  const existingRequest = useMemo(() => 
+
+  const existingRequest = useMemo(() =>
     pendingRequests.find(req => req.action_key === actionKey && req.action_label === actionLabel && req.status === 'PENDING'),
     [pendingRequests, actionKey, actionLabel]
   );
@@ -39,8 +39,8 @@ const RequestAuthorizationModal: React.FC<RequestAuthorizationModalProps> = ({ i
 
     // Fallback se não estiver em formato de chaves (labels legados ou manuais)
     if (!data['OP'] && label.includes('ID: ')) {
-        const legacyId = label.split('ID: ')[1]?.split(' |')[0]?.trim();
-        return `(AÇÃO ${existingRequest?.protocol_id || 'REQ-PENDENTE'}) –
+      const legacyId = label.split('ID: ')[1]?.split(' |')[0]?.trim();
+      return `(AÇÃO ${existingRequest?.protocol_id || 'REQ-PENDENTE'}) –
 Usuário: ${currentUser?.name || 'Operador'}
 Operação: Ação Manual Restrita
 Contexto: Módulo Interno
@@ -62,17 +62,17 @@ Valor envolvido: ${val}`;
 
   const handleRequest = async () => {
     if (!currentUser || isDuplicate) return;
-    try { 
-      await authorizationService.requestAuthorization(actionKey, actionLabel, currentUser); 
+    try {
+      await authorizationService.requestAuthorization(actionKey, actionLabel, currentUser);
       if (onSuccess) onSuccess();
-      onClose(); 
-    } catch (err: any) { 
-      alert("Erro ao solicitar: " + err.message); 
+      onClose();
+    } catch (err: any) {
+      alert("Erro ao solicitar: " + err.message);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-300">
       <div className="enterprise-card w-full max-w-lg overflow-hidden shadow-2xl border-slate-700 animate-in zoom-in-95 duration-200">
         <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-brand-warning/5">
           <h2 className="text-lg font-black flex items-center gap-3 text-white uppercase tracking-widest"><Lock className="text-brand-warning" size={22} /> Controle de Segurança</h2>
@@ -87,24 +87,23 @@ Valor envolvido: ${val}`;
             <p className="text-sm text-slate-500 mt-2 font-medium">Esta operação exige revisão narrativa e liberação remota de um supervisor.</p>
           </div>
           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 text-left space-y-4 shadow-inner">
-             <div className="flex justify-between items-center text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800/50 pb-2">
-                <span className="flex items-center gap-1.5"><Info size={12} className="text-brand-warning"/> Protocolo Operacional</span>
-                <span className="flex items-center gap-1"><Clock size={10}/> {existingRequest ? 'SOLICITADO ÀS ' + new Date(existingRequest.created_at).toLocaleTimeString() : new Date().toLocaleTimeString()}</span>
-             </div>
-             <pre className={`text-[11px] font-bold uppercase leading-relaxed whitespace-pre-wrap font-sans ${isDuplicate ? 'text-brand-success' : 'text-white'}`}>
-               {getHumanExplanation(actionLabel)}
-             </pre>
+            <div className="flex justify-between items-center text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800/50 pb-2">
+              <span className="flex items-center gap-1.5"><Info size={12} className="text-brand-warning" /> Protocolo Operacional</span>
+              <span className="flex items-center gap-1"><Clock size={10} /> {existingRequest ? 'SOLICITADO ÀS ' + new Date(existingRequest.created_at).toLocaleTimeString() : new Date().toLocaleTimeString()}</span>
+            </div>
+            <pre className={`text-[11px] font-bold uppercase leading-relaxed whitespace-pre-wrap font-sans ${isDuplicate ? 'text-brand-success' : 'text-white'}`}>
+              {getHumanExplanation(actionLabel)}
+            </pre>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <button onClick={onClose} className="py-4 border border-slate-800 rounded-xl font-black text-[10px] uppercase tracking-widest text-slate-500 hover:bg-slate-800 hover:text-white transition-all">VOLTAR</button>
-            <button 
-              onClick={handleRequest} 
-              disabled={isDuplicate} 
-              className={`py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all ${
-                isDuplicate 
-                ? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed' 
-                : 'bg-brand-warning text-black shadow-brand-warning/20 hover:scale-[1.02] active:scale-95'
-              }`}
+            <button
+              onClick={handleRequest}
+              disabled={isDuplicate}
+              className={`py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all ${isDuplicate
+                  ? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed'
+                  : 'bg-brand-warning text-black shadow-brand-warning/20 hover:scale-[1.02] active:scale-95'
+                }`}
             >
               {isDuplicate ? 'AGUARDANDO GESTOR' : 'SOLICITAR AGORA'}
             </button>

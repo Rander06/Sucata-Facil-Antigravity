@@ -12,7 +12,7 @@ const CloudConfig: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const CLOUD_CONFIG_KEY = 'sucata_facil_cloud_config';
 
-  const MASTER_SQL = `-- SUCATA FÁCIL v3.0 - SECURITY FIX v4.14 (NUCLEAR OPTION)
+  const MASTER_SQL = `-- SUCATA FÁCIL v3.0 - SECURITY FIX v4.16 (NUCLEAR OPTION)
 -- ESTE SCRIPT REMOVE *TODAS* AS POLÍTICAS DE *TODAS* AS TABELAS PÚBLICAS.
 -- ISSO É NECESSÁRIO PORQUE O SECURITY ADVISOR AINDA ESTÁ "VENDO" POLÍTICAS ANTIGAS.
 
@@ -41,9 +41,13 @@ BEGIN
         SELECT tablename FROM pg_tables WHERE schemaname = 'public'
     LOOP
         EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tbl.tablename);
+        
+        -- Garante limpeza de políticas legadas para evitar erro de duplicidade
+        EXECUTE format('DROP POLICY IF EXISTS "policy_v4_14_compliant_%s" ON public.%I', tbl.tablename, tbl.tablename);
+        EXECUTE format('DROP POLICY IF EXISTS "policy_v4_16_compliant_%s" ON public.%I', tbl.tablename, tbl.tablename);
 
         EXECUTE format('
-            CREATE POLICY "policy_v4_14_compliant_%s" ON public.%I
+            CREATE POLICY "policy_v4_16_compliant_%s" ON public.%I
             AS PERMISSIVE FOR ALL
             TO public
             USING (auth.role() IN (''anon'', ''authenticated'', ''service_role''))
@@ -72,12 +76,39 @@ BEGIN
 END $$;
 
 NOTIFY pgrst, 'reload schema';
-END $$;
 
 -- PARTE 4: UPDATE SCHEMA (ADD NEW COLUMNS)
--- Adiciona coluna para contexto de lançamento de títulos (v4.15)
+-- Adiciona colunas para autorização remota e contexto de lançamento (v4.16)
 DO $$
 BEGIN
+    -- profiles
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='profiles' AND column_name='remote_authorizations') THEN
+        ALTER TABLE public.profiles ADD COLUMN remote_authorizations JSONB DEFAULT '[]'::jsonb;
+    END IF;
+
+    -- invites
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='invites' AND column_name='remote_authorizations') THEN
+        ALTER TABLE public.invites ADD COLUMN remote_authorizations JSONB DEFAULT '[]'::jsonb;
+    END IF;
+
+    -- authorization_requests (garantir campos novos v4.16)
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='authorization_requests' AND column_name='action_payload') THEN
+        ALTER TABLE public.authorization_requests ADD COLUMN action_payload TEXT DEFAULT '';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='authorization_requests' AND column_name='approval_code') THEN
+        ALTER TABLE public.authorization_requests ADD COLUMN approval_code TEXT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='authorization_requests' AND column_name='responded_at') THEN
+        ALTER TABLE public.authorization_requests ADD COLUMN responded_at TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='authorization_requests' AND column_name='responded_by_id') THEN
+        ALTER TABLE public.authorization_requests ADD COLUMN responded_by_id UUID;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='authorization_requests' AND column_name='responded_by_name') THEN
+        ALTER TABLE public.authorization_requests ADD COLUMN responded_by_name TEXT;
+    END IF;
+
+    -- Contexto de lançamento de títulos (v4.15)
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='payment_terms' AND column_name='show_in_title_launch') THEN
         ALTER TABLE public.payment_terms ADD COLUMN show_in_title_launch BOOLEAN DEFAULT FALSE;
     END IF;
@@ -144,7 +175,7 @@ END $$;
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500 pb-20">
       <header>
         <h1 className="text-3xl font-black flex items-center gap-3 text-white uppercase tracking-tight"><Cloud className="text-brand-success" /> Infraestrutura Cloud</h1>
-        <p className="text-slate-500 mt-1">SaaS Security Nuclear Option v4.14</p>
+        <p className="text-slate-500 mt-1">SaaS Security Nuclear Option v4.16</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
@@ -160,7 +191,7 @@ END $$;
                 <textarea required rows={3} className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-mono text-xs outline-none focus:border-brand-success resize-none" value={config.key} onChange={e => setConfig({ ...config, key: e.target.value })} placeholder="eyJhbGci..." />
               </div>
               <button type="submit" disabled={status === 'testing'} className="w-full py-4 bg-brand-success text-white rounded-xl font-black uppercase text-xs tracking-widest shadow-lg hover:scale-[1.02] disabled:opacity-50 transition-all">
-                {status === 'testing' ? 'Conectando...' : 'Reconectar Cluster v4.14'}
+                {status === 'testing' ? 'Conectando...' : 'Reconectar Cluster v4.16'}
               </button>
             </form>
 
@@ -175,7 +206,7 @@ END $$;
               <div className="mt-8 space-y-6 animate-in slide-in-from-top-2">
                 <div className="p-4 bg-brand-success/10 border border-brand-success/30 rounded-2xl flex items-center gap-4">
                   <ShieldCheck className="text-brand-success" size={24} />
-                  <p className="text-white font-bold text-sm">Cluster Ativo! v4.14 Pronto.</p>
+                  <p className="text-white font-bold text-sm">Cluster Ativo! v4.16 Pronto.</p>
                 </div>
 
                 <div className="p-6 bg-blue-500/5 border border-blue-500/20 rounded-2xl space-y-4">
@@ -201,7 +232,7 @@ END $$;
         <div className="lg:col-span-2">
           <div className="enterprise-card p-6 border-slate-800 flex flex-col h-full">
             <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-4">
-              <h3 className="text-xs font-black uppercase text-brand-success">SQL Master v4.14</h3>
+              <h3 className="text-xs font-black uppercase text-brand-success">SQL Master v4.16</h3>
               <button onClick={handleCopySQL} className="text-[10px] font-black uppercase text-slate-500 hover:text-white flex items-center gap-2">
                 {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copiado' : 'Copiar'}
               </button>

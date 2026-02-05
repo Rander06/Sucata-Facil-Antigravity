@@ -364,7 +364,8 @@ const Login: React.FC = () => {
               name: inviteData.name,
               company_id: inviteData.company_id,
               profile: inviteData.profile,
-              permissions: inviteData.permissions, // Passando as permissões definidas no convite
+              permissions: inviteData.permissions,
+              remote_authorizations: inviteData.remote_authorizations, // Passing remote authorizations from the invite
               invite_id: inviteData.id
             }
           }

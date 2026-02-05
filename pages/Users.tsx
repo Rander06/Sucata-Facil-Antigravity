@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { DEFAULT_PERMISSIONS } from '../utils/permissions';
+import { DEFAULT_PERMISSIONS, DEFAULT_AUTHORIZATIONS } from '../utils/permissions';
 import { useAppContext } from '../store/AppContext';
 import { db } from '../services/dbService';
-import { User, PermissionModule, UserRole, OperationalProfile, AuthorizationRequest } from '../types';
+import { User, PermissionModule, UserRole, OperationalProfile, AuthorizationRequest, RemoteAuthorization } from '../types';
 import RequestAuthorizationModal from '../components/RequestAuthorizationModal';
 import {
   Plus,
@@ -56,11 +56,20 @@ const Users: React.FC = () => {
     return Array.from(allPerms);
   };
 
+  const getCombinedAuthorizations = (profiles: OperationalProfile[]): RemoteAuthorization[] => {
+    const allAuths = new Set<RemoteAuthorization>();
+    profiles.forEach(p => {
+      const auths = DEFAULT_AUTHORIZATIONS[p] || [];
+      auths.forEach(auth => allAuths.add(auth));
+    });
+    return Array.from(allAuths);
+  };
+
   // CONTROLE DE PEDIDOS DE LIBERAÇÃO REMOTA
   const [isRequestAuthModalOpen, setIsRequestAuthModalOpen] = useState(false);
   const [authRequestData, setAuthRequestData] = useState<{ key: string, label: string } | null>(null);
 
-  const [inviteForm, setInviteForm] = useState({ name: '', email: '', profile: OperationalProfile.VENDEDOR, permissions: [] as PermissionModule[] });
+  const [inviteForm, setInviteForm] = useState({ name: '', email: '', profile: OperationalProfile.VENDEDOR, permissions: [] as PermissionModule[], remote_authorizations: [] as RemoteAuthorization[] });
   const [editFormData, setEditFormData] = useState<Partial<User>>({});
 
   const loadData = useCallback(() => {
@@ -112,7 +121,7 @@ const Users: React.FC = () => {
     if (!userModal.data) return;
 
     // Se tiver permissão de edição direta
-    if (currentUser?.permissions.includes(PermissionModule.TEAM_EDIT)) {
+    if (currentUser?.permissions.includes(PermissionModule.TEAMS)) {
       try {
         await db.update('users', userModal.data.id, editFormData);
         // Se for o próprio usuário, pode ser bom dar um feedback, mas loadData já atualiza a tabela
@@ -176,9 +185,13 @@ const Users: React.FC = () => {
                     <div className="flex gap-2">
                       {user.email !== 'admin@sucatafacil.com' && <button onClick={() => {
                         setEditFormData({ ...user });
-                        // Validar se o perfil do usuário corresponde a um dos perfis padrão
-                        const profileEnum = Object.values(OperationalProfile).find(p => p === user.profile);
-                        setEditProfiles(profileEnum ? [profileEnum] : []);
+                        // Validar se o perfil do usuário corresponde a um ou mais perfis padrão
+                        const profileString = user.profile || '';
+                        const currentProfiles = profileString.split(', ').filter(p =>
+                          Object.values(OperationalProfile).includes(p as any)
+                        ) as OperationalProfile[];
+
+                        setEditProfiles(currentProfiles);
                         setUserModal({ show: true, data: user });
                       }} className="p-2.5 bg-slate-800 text-slate-400 rounded-xl"><Edit2 size={16} /></button>}
                       {user.email !== 'admin@sucatafacil.com' && <button onClick={() => {
@@ -286,10 +299,10 @@ const Users: React.FC = () => {
       </div>
 
       {userModal.show && userModal.data && (
-        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
-          <div className="enterprise-card w-full max-w-xl overflow-hidden shadow-2xl border-slate-700">
+        <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
+          <div className="enterprise-card w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Edit2 size={24} /> Editar Integrante</h2><button onClick={() => setUserModal({ show: false, data: null })} className="p-2 text-slate-500"><X size={32} /></button></div>
-            <form onSubmit={handleSaveUser} className="p-8 space-y-6">
+            <form onSubmit={handleSaveUser} className="p-8 pb-24 space-y-6">
               <div className="space-y-3">
                 <label htmlFor="edit-user-name" className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
                 <input required id="edit-user-name" name="name" className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
@@ -317,10 +330,12 @@ const Users: React.FC = () => {
                           setEditProfiles(newProfiles);
 
                           const combinedPerms = getCombinedPermissions(newProfiles);
+                          const combinedAuths = getCombinedAuthorizations(newProfiles);
                           setEditFormData({
                             ...editFormData,
-                            profile: newProfiles.length === 1 ? newProfiles[0] : (newProfiles.length > 0 ? 'Personalizado' : ''),
-                            permissions: combinedPerms
+                            profile: newProfiles.join(', ') || 'Personalizado',
+                            permissions: combinedPerms,
+                            remote_authorizations: combinedAuths
                           });
                         }}
                         className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col items-center gap-2 text-center ${isSelected ? 'bg-brand-success/10 border-brand-success text-brand-success' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
@@ -343,18 +358,16 @@ const Users: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-2 bg-slate-950/30 rounded-xl border border-slate-800">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-2 bg-slate-950/30 rounded-xl border border-slate-800">
                   {[
                     { title: 'Dashboard', items: [PermissionModule.DASHBOARD] },
-                    { title: 'Suporte', items: [PermissionModule.SUPPORT_HELP_CHANNELS, PermissionModule.SUPPORT_SECURITY_BACKUP] },
+                    { title: 'Vendas PDV', items: [PermissionModule.SALES_PDV] },
+                    { title: 'Financeiro', items: [PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_AUDIT, PermissionModule.FINANCE_EXTRACT] },
+                    { title: 'Compras PDV', items: [PermissionModule.PURCHASES_PDV] },
+                    { title: 'Cadastro', items: [PermissionModule.STOCK, PermissionModule.PARTNERS, PermissionModule.TEAMS, PermissionModule.BANKS, PermissionModule.FINANCE_CATEGORIES, PermissionModule.COMMERCIAL_TERMS] },
                     { title: 'Relatórios (Granular)', items: [PermissionModule.REPORTS_GENERAL, PermissionModule.REPORTS_RECEIVABLES, PermissionModule.REPORTS_PAYABLES, PermissionModule.REPORTS_STOCK, PermissionModule.REPORTS_PARTNERS, PermissionModule.REPORTS_AUDIT] },
-                    { title: 'Vendas (PDV)', items: [PermissionModule.SALES_VIEW, PermissionModule.SALES_CREATE, PermissionModule.SALES_CLOSE_CASHIER] },
-                    { title: 'Financeiro', items: [PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_AUDIT, PermissionModule.FINANCE_EXTRACT, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE] },
-                    { title: 'Compras', items: [PermissionModule.PURCHASES_VIEW, PermissionModule.PURCHASES_CREATE, PermissionModule.PURCHASES_EDIT, PermissionModule.PURCHASES_DELETE] },
-                    { title: 'Estoque', items: [PermissionModule.STOCK_VIEW, PermissionModule.STOCK_CREATE, PermissionModule.STOCK_EDIT, PermissionModule.STOCK_DELETE, PermissionModule.STOCK_ADJUST] },
-                    { title: 'Parceiros', items: [PermissionModule.PARTNERS_VIEW, PermissionModule.PARTNERS_CREATE, PermissionModule.PARTNERS_EDIT, PermissionModule.PARTNERS_DELETE] },
-                    { title: 'Equipe', items: [PermissionModule.TEAM_VIEW, PermissionModule.TEAM_INVITE, PermissionModule.TEAM_EDIT, PermissionModule.TEAM_DELETE] },
-                    { title: 'SaaS Master', items: [PermissionModule.SAAS_DASHBOARD, PermissionModule.SAAS_COMPANIES, PermissionModule.SAAS_PLANS] },
+                    { title: 'SaaS Master', items: [PermissionModule.SAAS_DASHBOARD, PermissionModule.SAAS_COMPANIES, PermissionModule.SAAS_PLANS, PermissionModule.INFRA_CLOUD] },
+                    { title: 'Suporte', items: [PermissionModule.SUPPORT_HELP_CHANNELS, PermissionModule.SUPPORT_SECURITY_BACKUP] },
                   ].map(group => (
                     <div key={group.title} className="col-span-full space-y-2 mb-2">
                       <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest pl-1 border-b border-slate-800 pb-1">{group.title}</h4>
@@ -389,6 +402,89 @@ const Users: React.FC = () => {
                 </div>
               </div>
 
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <ShieldAlert size={14} /> Autorizações Remotas
+                  </label>
+                  <span className="text-[10px] text-brand-success font-bold uppercase bg-brand-success/10 px-2 py-1 rounded-lg border border-brand-success/20">
+                    {(editFormData.remote_authorizations || []).length} Selecionadas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-950/30 rounded-xl border border-slate-800">
+                  {[
+                    {
+                      title: 'PÁGINA DE CADASTRO',
+                      subGroups: [
+                        { title: 'Estoque', items: [{ key: RemoteAuthorization.AUTH_ESTOQUE_EDIT, label: 'Editar estoque' }, { key: RemoteAuthorization.AUTH_ESTOQUE_DELETE, label: 'Excluir estoque' }, { key: RemoteAuthorization.AUTH_ESTOQUE_ADJUST, label: 'Ajuste estoque Inventário' }] },
+                        { title: 'Parceiros', items: [{ key: RemoteAuthorization.AUTH_PARTNERS_EDIT, label: 'Editar parceiros' }, { key: RemoteAuthorization.AUTH_PARTNERS_DELETE, label: 'Excluir parceiros' }] },
+                        { title: 'Equipes', items: [{ key: RemoteAuthorization.AUTH_TEAMS_EDIT, label: 'Editar equipes' }, { key: RemoteAuthorization.AUTH_TEAMS_DELETE, label: 'Excluir equipes' }] },
+                        { title: 'Instituição Bancária', items: [{ key: RemoteAuthorization.AUTH_BANKS_EDIT, label: 'Editar instituição' }, { key: RemoteAuthorization.AUTH_BANKS_DELETE, label: 'Excluir instituição' }] },
+                        { title: 'Categorias', items: [{ key: RemoteAuthorization.AUTH_CATEGORIES_EDIT, label: 'Editar categorias' }, { key: RemoteAuthorization.AUTH_CATEGORIES_DELETE, label: 'Excluir categorias' }] },
+                        { title: 'Formas Pagamentos', items: [{ key: RemoteAuthorization.AUTH_TERMS_EDIT, label: 'Editar forma' }, { key: RemoteAuthorization.AUTH_TERMS_DELETE, label: 'Excluir forma' }] }
+                      ]
+                    },
+                    {
+                      title: 'PÁGINA DE FINANCEIRO',
+                      subGroups: [
+                        { title: 'Liquidação de Títulos', items: [{ key: RemoteAuthorization.AUTH_FINANCE_TITLE_EDIT, label: 'Editar titulo' }, { key: RemoteAuthorization.AUTH_FINANCE_TITLE_DELETE, label: 'Excluir titulo' }, { key: RemoteAuthorization.AUTH_FINANCE_TITLE_REVERSE, label: 'Estornar titulo' }, { key: RemoteAuthorization.AUTH_FINANCE_CLOSE_CASHIER, label: 'Fechar caixa' }] },
+                        { title: 'Auditoria de Turnos', items: [{ key: RemoteAuthorization.AUTH_FINANCE_AUDIT_REVERSE, label: 'Estornar turno' }] },
+                        { title: 'Extrato Bancário', items: [{ key: RemoteAuthorization.AUTH_FINANCE_EXTRACT_MANUAL_OUT, label: 'Lançar Saída banco' }, { key: RemoteAuthorization.AUTH_FINANCE_EXTRACT_DELETE, label: 'Excluir lançamento' }, { key: RemoteAuthorization.AUTH_FINANCE_EXTRACT_EDIT, label: 'Editar lançamento' }] }
+                      ]
+                    },
+                    {
+                      title: 'PÁGINA DE COMPRA/VENDA',
+                      subGroups: [
+                        { title: 'Lançamento entrada/saida pdv', items: [{ key: RemoteAuthorization.AUTH_POS_MANUAL_IN, label: 'Lançamento Entrada' }, { key: RemoteAuthorization.AUTH_POS_MANUAL_OUT, label: 'Lançamento Saída' }] },
+                        { title: 'Histórico pdv', items: [{ key: RemoteAuthorization.AUTH_POS_HISTORY_EDIT, label: 'Editar lançamento' }, { key: RemoteAuthorization.AUTH_POS_HISTORY_DELETE, label: 'Excluir lançamento' }, { key: RemoteAuthorization.AUTH_POS_HISTORY_REVERSE, label: 'Estornar lançamento' }, { key: RemoteAuthorization.AUTH_POS_CLOSE_CASHIER, label: 'Encerrar caixa' }] }
+                      ]
+                    },
+                    {
+                      title: 'PÁGINA DE SUPORTE & BACKUP',
+                      subGroups: [{ title: 'Backup', items: [{ key: RemoteAuthorization.AUTH_BACKUP_RESTORE, label: 'Restaurar backup' }] }]
+                    }
+                  ].map(block => (
+                    <div key={block.title} className="col-span-full space-y-4 mb-6">
+                      <h3 className="text-xs font-black uppercase text-brand-success tracking-[0.2em] border-b-2 border-brand-success/20 pb-2">{block.title}</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {block.subGroups.map(sub => (
+                          <div key={sub.title} className="space-y-2">
+                            <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest">{sub.title}</h4>
+                            <div className="space-y-1.5">
+                              {sub.items.map(auth => {
+                                const isSelected = (editFormData.remote_authorizations || []).includes(auth.key);
+                                return (
+                                  <label key={auth.key} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-slate-800 border-brand-success/50 text-white' : 'bg-transparent border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                                    <input
+                                      type="checkbox"
+                                      className="hidden"
+                                      checked={isSelected}
+                                      onChange={() => {
+                                        const currentAuths = editFormData.remote_authorizations || [];
+                                        if (isSelected) {
+                                          setEditFormData({ ...editFormData, remote_authorizations: currentAuths.filter(a => a !== auth.key) });
+                                        } else {
+                                          setEditFormData({ ...editFormData, remote_authorizations: [...currentAuths, auth.key] });
+                                        }
+                                      }}
+                                    />
+                                    <div className={`w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-brand-success border-brand-success text-black' : 'border-slate-600'}`}>
+                                      {isSelected && <CheckCircle2 size={10} strokeWidth={4} />}
+                                    </div>
+                                    <span className="text-[10px] font-bold uppercase truncate">{auth.label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <button type="submit" className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-sm tracking-[0.2em] shadow-2xl hover:scale-[1.02] transition-all">SOLICITAR LIBERAÇÃO EDIÇÃO</button>
             </form>
           </div>
@@ -397,8 +493,8 @@ const Users: React.FC = () => {
 
       {/* MODAL DE CONVITE */}
       {showInviteModal && (
-        <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
-          <div className="enterprise-card w-full max-w-2xl overflow-hidden shadow-2xl border-slate-700">
+        <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
+          <div className="enterprise-card w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
               <h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest">
                 <Mail size={24} className="text-brand-success" /> Novo Convite
@@ -419,12 +515,12 @@ const Users: React.FC = () => {
                 });
                 alert(`Convite gerado com sucesso!\n\nCódigo de Acesso: ${code}\nEnviado para: ${inviteForm.email}`);
                 setShowInviteModal(false);
-                setInviteForm({ name: '', email: '', profile: OperationalProfile.VENDEDOR, permissions: [] });
+                setInviteForm({ name: '', email: '', profile: OperationalProfile.VENDEDOR, permissions: [], remote_authorizations: [] });
                 loadData();
               } catch (err) {
                 alert('Erro ao gerar convite.');
               }
-            }} className="p-8 space-y-6">
+            }} className="p-8 pb-24 space-y-6">
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
@@ -478,10 +574,12 @@ const Users: React.FC = () => {
                           setInviteProfiles(newProfiles);
 
                           const combinedPerms = getCombinedPermissions(newProfiles);
+                          const combinedAuths = getCombinedAuthorizations(newProfiles);
                           setInviteForm({
                             ...inviteForm,
-                            profile: newProfiles.length === 1 ? newProfiles[0] : (newProfiles.length > 0 ? 'Personalizado' : ''),
-                            permissions: combinedPerms
+                            profile: newProfiles.join(', ') || 'Personalizado',
+                            permissions: combinedPerms,
+                            remote_authorizations: combinedAuths
                           });
                         }}
                         className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col items-center gap-2 text-center ${isSelected ? 'bg-brand-success/10 border-brand-success text-brand-success' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
@@ -505,18 +603,16 @@ const Users: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-2 bg-slate-950/30 rounded-xl border border-slate-800">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-2 bg-slate-950/30 rounded-xl border border-slate-800">
                   {[
                     { title: 'Dashboard', items: [PermissionModule.DASHBOARD] },
-                    { title: 'Suporte', items: [PermissionModule.SUPPORT_HELP_CHANNELS, PermissionModule.SUPPORT_SECURITY_BACKUP] },
+                    { title: 'Vendas PDV', items: [PermissionModule.SALES_PDV] },
+                    { title: 'Financeiro', items: [PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_AUDIT, PermissionModule.FINANCE_EXTRACT] },
+                    { title: 'Compras PDV', items: [PermissionModule.PURCHASES_PDV] },
+                    { title: 'Cadastro', items: [PermissionModule.STOCK, PermissionModule.PARTNERS, PermissionModule.TEAMS, PermissionModule.BANKS, PermissionModule.FINANCE_CATEGORIES, PermissionModule.COMMERCIAL_TERMS] },
                     { title: 'Relatórios (Granular)', items: [PermissionModule.REPORTS_GENERAL, PermissionModule.REPORTS_RECEIVABLES, PermissionModule.REPORTS_PAYABLES, PermissionModule.REPORTS_STOCK, PermissionModule.REPORTS_PARTNERS, PermissionModule.REPORTS_AUDIT] },
-                    { title: 'Vendas (PDV)', items: [PermissionModule.SALES_VIEW, PermissionModule.SALES_CREATE, PermissionModule.SALES_CLOSE_CASHIER] },
-                    { title: 'Financeiro', items: [PermissionModule.FINANCE_LIQUIDATE, PermissionModule.FINANCE_AUDIT, PermissionModule.FINANCE_EXTRACT, PermissionModule.FINANCE_CREATE, PermissionModule.FINANCE_EDIT, PermissionModule.FINANCE_DELETE] },
-                    { title: 'Compras', items: [PermissionModule.PURCHASES_VIEW, PermissionModule.PURCHASES_CREATE, PermissionModule.PURCHASES_EDIT, PermissionModule.PURCHASES_DELETE] },
-                    { title: 'Estoque', items: [PermissionModule.STOCK_VIEW, PermissionModule.STOCK_CREATE, PermissionModule.STOCK_EDIT, PermissionModule.STOCK_DELETE, PermissionModule.STOCK_ADJUST] },
-                    { title: 'Parceiros', items: [PermissionModule.PARTNERS_VIEW, PermissionModule.PARTNERS_CREATE, PermissionModule.PARTNERS_EDIT, PermissionModule.PARTNERS_DELETE] },
-                    { title: 'Equipe', items: [PermissionModule.TEAM_VIEW, PermissionModule.TEAM_INVITE, PermissionModule.TEAM_EDIT, PermissionModule.TEAM_DELETE] },
-                    { title: 'SaaS Master', items: [PermissionModule.SAAS_DASHBOARD, PermissionModule.SAAS_COMPANIES, PermissionModule.SAAS_PLANS] },
+                    { title: 'SaaS Master', items: [PermissionModule.SAAS_DASHBOARD, PermissionModule.SAAS_COMPANIES, PermissionModule.SAAS_PLANS, PermissionModule.INFRA_CLOUD] },
+                    { title: 'Suporte', items: [PermissionModule.SUPPORT_HELP_CHANNELS, PermissionModule.SUPPORT_SECURITY_BACKUP] },
                   ].map(group => (
                     <div key={group.title} className="col-span-full space-y-2 mb-2">
                       <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest pl-1 border-b border-slate-800 pb-1">{group.title}</h4>
@@ -544,6 +640,88 @@ const Users: React.FC = () => {
                             </label>
                           );
                         })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-6 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <ShieldAlert size={14} /> Autorizações Remotas
+                  </label>
+                  <span className="text-[10px] text-brand-success font-bold uppercase bg-brand-success/10 px-2 py-1 rounded-lg border border-brand-success/20">
+                    {inviteForm.remote_authorizations.length} Selecionadas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-950/30 rounded-xl border border-slate-800">
+                  {[
+                    {
+                      title: 'PÁGINA DE CADASTRO',
+                      subGroups: [
+                        { title: 'Estoque', items: [{ key: RemoteAuthorization.AUTH_ESTOQUE_EDIT, label: 'Editar estoque' }, { key: RemoteAuthorization.AUTH_ESTOQUE_DELETE, label: 'Excluir estoque' }, { key: RemoteAuthorization.AUTH_ESTOQUE_ADJUST, label: 'Ajuste estoque Inventário' }] },
+                        { title: 'Parceiros', items: [{ key: RemoteAuthorization.AUTH_PARTNERS_EDIT, label: 'Editar parceiros' }, { key: RemoteAuthorization.AUTH_PARTNERS_DELETE, label: 'Excluir parceiros' }] },
+                        { title: 'Equipes', items: [{ key: RemoteAuthorization.AUTH_TEAMS_EDIT, label: 'Editar equipes' }, { key: RemoteAuthorization.AUTH_TEAMS_DELETE, label: 'Excluir equipes' }] },
+                        { title: 'Instituição Bancária', items: [{ key: RemoteAuthorization.AUTH_BANKS_EDIT, label: 'Editar instituição' }, { key: RemoteAuthorization.AUTH_BANKS_DELETE, label: 'Excluir instituição' }] },
+                        { title: 'Categorias', items: [{ key: RemoteAuthorization.AUTH_CATEGORIES_EDIT, label: 'Editar categorias' }, { key: RemoteAuthorization.AUTH_CATEGORIES_DELETE, label: 'Excluir categorias' }] },
+                        { title: 'Formas Pagamentos', items: [{ key: RemoteAuthorization.AUTH_TERMS_EDIT, label: 'Editar forma' }, { key: RemoteAuthorization.AUTH_TERMS_DELETE, label: 'Excluir forma' }] }
+                      ]
+                    },
+                    {
+                      title: 'PÁGINA DE FINANCEIRO',
+                      subGroups: [
+                        { title: 'Liquidação de Títulos', items: [{ key: RemoteAuthorization.AUTH_FINANCE_TITLE_EDIT, label: 'Editar titulo' }, { key: RemoteAuthorization.AUTH_FINANCE_TITLE_DELETE, label: 'Excluir titulo' }, { key: RemoteAuthorization.AUTH_FINANCE_TITLE_REVERSE, label: 'Estornar titulo' }, { key: RemoteAuthorization.AUTH_FINANCE_CLOSE_CASHIER, label: 'Fechar caixa' }] },
+                        { title: 'Auditoria de Turnos', items: [{ key: RemoteAuthorization.AUTH_FINANCE_AUDIT_REVERSE, label: 'Estornar turno' }] },
+                        { title: 'Extrato Bancário', items: [{ key: RemoteAuthorization.AUTH_FINANCE_EXTRACT_MANUAL_OUT, label: 'Lançar Saída banco' }, { key: RemoteAuthorization.AUTH_FINANCE_EXTRACT_DELETE, label: 'Excluir lançamento' }, { key: RemoteAuthorization.AUTH_FINANCE_EXTRACT_EDIT, label: 'Editar lançamento' }] }
+                      ]
+                    },
+                    {
+                      title: 'PÁGINA DE COMPRA/VENDA',
+                      subGroups: [
+                        { title: 'Lançamento entrada/saida pdv', items: [{ key: RemoteAuthorization.AUTH_POS_MANUAL_IN, label: 'Lançamento Entrada' }, { key: RemoteAuthorization.AUTH_POS_MANUAL_OUT, label: 'Lançamento Saída' }] },
+                        { title: 'Histórico pdv', items: [{ key: RemoteAuthorization.AUTH_POS_HISTORY_EDIT, label: 'Editar lançamento' }, { key: RemoteAuthorization.AUTH_POS_HISTORY_DELETE, label: 'Excluir lançamento' }, { key: RemoteAuthorization.AUTH_POS_HISTORY_REVERSE, label: 'Estornar lançamento' }, { key: RemoteAuthorization.AUTH_POS_CLOSE_CASHIER, label: 'Encerrar caixa' }] }
+                      ]
+                    },
+                    {
+                      title: 'PÁGINA DE SUPORTE & BACKUP',
+                      subGroups: [{ title: 'Backup', items: [{ key: RemoteAuthorization.AUTH_BACKUP_RESTORE, label: 'Restaurar backup' }] }]
+                    }
+                  ].map(block => (
+                    <div key={block.title} className="col-span-full space-y-4 mb-6">
+                      <h3 className="text-xs font-black uppercase text-brand-success tracking-[0.2em] border-b-2 border-brand-success/20 pb-2">{block.title}</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {block.subGroups.map(sub => (
+                          <div key={sub.title} className="space-y-2">
+                            <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest">{sub.title}</h4>
+                            <div className="space-y-1.5">
+                              {sub.items.map(auth => {
+                                const isSelected = inviteForm.remote_authorizations.includes(auth.key);
+                                return (
+                                  <label key={auth.key} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-slate-800 border-brand-success/50 text-white' : 'bg-transparent border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                                    <input
+                                      type="checkbox"
+                                      className="hidden"
+                                      checked={isSelected}
+                                      onChange={() => {
+                                        if (isSelected) {
+                                          setInviteForm(prev => ({ ...prev, remote_authorizations: prev.remote_authorizations.filter(a => a !== auth.key) }));
+                                        } else {
+                                          setInviteForm(prev => ({ ...prev, remote_authorizations: [...prev.remote_authorizations, auth.key] }));
+                                        }
+                                      }}
+                                    />
+                                    <div className={`w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-brand-success border-brand-success text-black' : 'border-slate-600'}`}>
+                                      {isSelected && <CheckCircle2 size={10} strokeWidth={4} />}
+                                    </div>
+                                    <span className="text-[10px] font-bold uppercase truncate">{auth.label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}

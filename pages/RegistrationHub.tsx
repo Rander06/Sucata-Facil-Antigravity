@@ -29,7 +29,7 @@ const RegistrationHub: React.FC = () => {
       label: 'Estoque',
       description: 'Gestão de materiais e saldos',
       icon: Package,
-      permission: PermissionModule.STOCK_VIEW,
+      permission: PermissionModule.STOCK,
       component: <Inventory />,
       color: 'green'
     },
@@ -38,7 +38,7 @@ const RegistrationHub: React.FC = () => {
       label: 'Parceiros',
       description: 'Clientes e fornecedores',
       icon: UsersIcon,
-      permission: PermissionModule.PARTNERS_VIEW,
+      permission: PermissionModule.PARTNERS,
       component: <Partners />,
       color: 'blue'
     },
@@ -47,7 +47,7 @@ const RegistrationHub: React.FC = () => {
       label: 'Equipe',
       description: 'Usuários e permissões de acesso',
       icon: Settings,
-      permission: PermissionModule.TEAM_VIEW,
+      permission: PermissionModule.TEAMS,
       component: <Users />,
       color: 'yellow'
     },
@@ -56,7 +56,7 @@ const RegistrationHub: React.FC = () => {
       label: 'Instituições Bancárias',
       description: 'Gestão de contas e bancos',
       icon: Landmark,
-      permission: PermissionModule.FINANCE_VIEW,
+      permission: PermissionModule.BANKS,
       component: <Banks />,
       color: 'green'
     },
@@ -65,7 +65,7 @@ const RegistrationHub: React.FC = () => {
       label: 'Categorias Financeiras',
       description: 'Plano de contas e fluxos',
       icon: Tag,
-      permission: PermissionModule.FINANCE_VIEW,
+      permission: PermissionModule.FINANCE_CATEGORIES,
       component: <Finance mode="categories_only" />,
       color: 'red'
     },
@@ -74,7 +74,7 @@ const RegistrationHub: React.FC = () => {
       label: 'Prazos Comerciais',
       description: 'Condições de pagamento',
       icon: CreditCard,
-      permission: PermissionModule.FINANCE_VIEW,
+      permission: PermissionModule.COMMERCIAL_TERMS,
       component: <Finance mode="terms_only" />,
       color: 'indigo'
     }

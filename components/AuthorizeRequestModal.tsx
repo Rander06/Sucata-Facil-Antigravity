@@ -3,7 +3,7 @@ import { X, ShieldCheck, UserCheck, Lock, ChevronRight, AlertCircle, Key, Clock,
 import { useAppContext } from '../store/AppContext';
 import { authorizationService } from '../services/authorizationService';
 import { db } from '../services/dbService';
-import { AuthorizationRequest, PermissionModule } from '../types';
+import { AuthorizationRequest, PermissionModule, RemoteAuthorization } from '../types';
 
 interface AuthorizeRequestModalProps {
   isOpen: boolean;
@@ -64,9 +64,22 @@ Valor envolvido: ${val}`;
     setIsProcessing(true);
     setError('');
     try {
-      const manager = db.verifyCredentials(email, password, PermissionModule.TEAM_EDIT);
+      const requiredAuth = selectedRequest.action_key as RemoteAuthorization;
+      const isRemoteAuth = Object.values(RemoteAuthorization).includes(requiredAuth);
+
+      let manager = null;
+      if (isRemoteAuth) {
+        manager = db.verifyCredentials(email, password, undefined, requiredAuth);
+      }
+
       if (!manager) {
-        setError('Credenciais de gestor inválidas ou sem permissão de edição.');
+        manager = db.verifyCredentials(email, password, PermissionModule.TEAMS);
+      }
+
+      if (!manager) {
+        setError(isRemoteAuth
+          ? 'Credenciais inválidas ou sem autorização para esta ação.'
+          : 'Credenciais de gestor inválidas ou sem permissão de edição.');
         setIsProcessing(false);
         return;
       }
@@ -85,9 +98,20 @@ Valor envolvido: ${val}`;
     setIsProcessing(true);
     setError('');
     try {
-      const manager = db.verifyCredentials(email, password, PermissionModule.TEAM_EDIT);
+      const requiredAuth = selectedRequest.action_key as RemoteAuthorization;
+      const isRemoteAuth = Object.values(RemoteAuthorization).includes(requiredAuth);
+
+      let manager = null;
+      if (isRemoteAuth) {
+        manager = db.verifyCredentials(email, password, undefined, requiredAuth);
+      }
+
       if (!manager) {
-        setError('Credenciais de gestor inválidas.');
+        manager = db.verifyCredentials(email, password, PermissionModule.TEAMS);
+      }
+
+      if (!manager) {
+        setError('Credenciais inválidas.');
         setIsProcessing(false);
         return;
       }

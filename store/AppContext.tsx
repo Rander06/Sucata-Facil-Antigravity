@@ -170,10 +170,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Initialize POS type if not set
       if (!posType) {
-        const isSuperUser = currentUser.role === UserRole.SUPER_ADMIN || currentUser.profile === OperationalProfile.MASTER;
+        const isSuperUser = currentUser.role === UserRole.SUPER_ADMIN || currentUser.profile?.includes(OperationalProfile.MASTER);
         if (isSuperUser) setPosType('sell');
-        else if (currentUser.permissions.includes(PermissionModule.PURCHASES_VIEW)) setPosType('buy');
-        else if (currentUser.permissions.includes(PermissionModule.SALES_VIEW)) setPosType('sell');
+        else if (currentUser.permissions.includes(PermissionModule.PURCHASES_PDV)) setPosType('buy');
+        else if (currentUser.permissions.includes(PermissionModule.SALES_PDV)) setPosType('sell');
         else setPosType('buy');
       }
     } else {
