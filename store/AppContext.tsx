@@ -128,10 +128,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (client) {
           // Silent sync check
           db.syncFromCloud().then(success => {
-            if (success) refreshData();
+            if (success) {
+              refreshData();
+              refreshRequests();
+            }
           });
         }
-      }, 5000);
+      }, 60000); // Polling de redundância a cada 60s (Realtime cuida do tempo real)
 
       // Initialize Realtime Subscription
       const unsubscribe = db.subscribeToChanges(() => {
@@ -207,6 +210,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useAppContext = () => {
   const context = useContext(AppContext);
-  if (!context) throw new Error('useAppContext must be used within AppProvider');
+  if (!context) {
+    console.error('[CONTEXT] useAppContext was called outside an AppProvider. This usually happens if a component is rendered via a portal or outside the root <App /> tree.');
+    throw new Error('useAppContext must be used within AppProvider');
+  }
   return context;
 };

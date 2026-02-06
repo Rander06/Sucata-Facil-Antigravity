@@ -140,11 +140,12 @@ const Banks: React.FC = () => {
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleSave} className="p-8 space-y-6">
+            <form onSubmit={handleSave} className="p-8 space-y-6" autoComplete="new-password">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Nome do Banco</label>
                 <input
                   required
+                  autoComplete="new-password"
                   className="w-full bg-slate-900/50 border border-slate-800 p-4 rounded-xl text-white font-bold placeholder:text-slate-700 outline-none focus:border-brand-success transition-all"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value.toUpperCase() })}
@@ -174,6 +175,7 @@ const Banks: React.FC = () => {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Conta</label>
                   <input
+                    autoComplete="new-password"
                     className="w-full bg-slate-900/50 border border-slate-800 p-4 rounded-xl text-white font-bold placeholder:text-slate-700 outline-none focus:border-brand-success transition-all text-center"
                     value={formData.account}
                     onChange={e => setFormData({ ...formData, account: e.target.value })}

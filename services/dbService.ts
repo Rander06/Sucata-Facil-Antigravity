@@ -239,6 +239,8 @@ export const db = {
   },
 
   reInitializeCloud: () => {
+    // Ao re-inicializar, limpamos a instância antiga para forçar o singleton do supabase.ts a criar um novo
+    // se necessário, embora agora createSupabaseClient já gerencie isso internamente.
     supabaseInstance = createSupabaseClient();
     return !!supabaseInstance;
   },
@@ -248,55 +250,58 @@ export const db = {
     const client = db.getCloudClient();
     if (!client) return false;
     try {
-      const currentState = db.get();
+      const downloadedData: Record<string, any[]> = {};
       const syncTables = ['materials', 'partners', 'financials', 'transactions', 'cashierSessions', 'walletTransactions', 'banks', 'logs', 'invites', 'companies', 'plans', 'users', 'paymentTerms', 'financeCategories', 'authorization_requests'];
 
-      const { data: { session } } = await client.auth.getSession();
-
+      // 1. Download all tables into temporary memory buffer
       for (const tableKey of syncTables) {
         const cloudTable = TABLE_MAP[tableKey];
         if (!cloudTable) continue;
 
         const { data, error } = await client.from(cloudTable).select('*');
         if (!error && data) {
-          const normalized = data.map(applyRedundancy);
-
-          if (tableKey === 'users') {
-            // Smart Merge for Users to preserve local Heartbeat timestamps
-            // CRITICAL FIX: Fetch FRESH local state. 'currentState' is a snapshot from start of function (stale).
-            // A heartbeat might have happened while awaiting the network request.
-            const freshState = db.get();
-            const currentUsers = (freshState as any).users || [];
-
-            (currentState as any).users = normalized.map((cloudUser: any) => {
-              const localUser = currentUsers.find((u: any) => u.id === cloudUser.id);
-              if (localUser) {
-                // AGGRESSIVE PRESENCE MERGE:
-                // Trust local 'Heartbeat' timestamps if they are recent (< 5 min), 
-                // preventing the "Offline" flicker when Cloud data is stale or sync lags.
-                const localUpdated = localUser.updated_at ? new Date(localUser.updated_at).getTime() : 0;
-                const cloudUpdated = cloudUser.updated_at ? new Date(cloudUser.updated_at).getTime() : 0;
-
-                const isLocalRecent = (Date.now() - localUpdated) < 300000; // 5 minutes buffer
-
-                if (localUpdated >= cloudUpdated || isLocalRecent) {
-                  return {
-                    ...cloudUser,
-                    updated_at: localUser.updated_at,
-                    last_login: localUser.last_login,
-                    // Also keep last_logout if local is newer
-                    last_logout: (localUser.last_logout && new Date(localUser.last_logout).getTime() > (cloudUser.last_logout ? new Date(cloudUser.last_logout).getTime() : 0)) ? localUser.last_logout : cloudUser.last_logout
-                  };
-                }
-              }
-              return cloudUser;
-            });
-          } else {
-            (currentState as any)[tableKey] = normalized;
-          }
+          downloadedData[tableKey] = data.map(applyRedundancy);
         }
       }
-      db.save(currentState);
+
+      // 2. ATOMIC UPDATE: Read fresh state, merge, and save immediately
+      const freshState = db.get();
+
+      for (const tableKey of syncTables) {
+        const normalizedCloud = downloadedData[tableKey];
+        if (!normalizedCloud) continue;
+
+        if (tableKey === 'users') {
+          const currentUsers = (freshState as any).users || [];
+          (freshState as any).users = normalizedCloud.map((cloudUser: any) => {
+            const localUser = currentUsers.find((u: any) => u.id === cloudUser.id);
+            if (localUser) {
+              const localUpdated = localUser.updated_at ? new Date(localUser.updated_at).getTime() : 0;
+              const cloudUpdated = cloudUser.updated_at ? new Date(cloudUser.updated_at).getTime() : 0;
+              const isLocalRecent = (Date.now() - localUpdated) < 300000;
+              if (localUpdated >= cloudUpdated || isLocalRecent) {
+                return { ...cloudUser, updated_at: localUser.updated_at, last_login: localUser.last_login, last_logout: (localUser.last_logout && new Date(localUser.last_logout).getTime() > (cloudUser.last_logout ? new Date(cloudUser.last_logout).getTime() : 0)) ? localUser.last_logout : cloudUser.last_logout };
+              }
+            }
+            return cloudUser;
+          });
+        } else {
+          const cloudIds = new Set(normalizedCloud.map((it: any) => it.id));
+          const localItems = (freshState as any)[tableKey] || [];
+
+          const recentUnsyncedLocal = localItems.filter((localIt: any) => {
+            if (cloudIds.has(localIt.id)) return false;
+            const createdAt = localIt.created_at ? new Date(localIt.created_at).getTime() : 0;
+            const updatedAt = localIt.updated_at ? new Date(localIt.updated_at).getTime() : 0;
+            const latest = Math.max(createdAt, updatedAt);
+            return (Date.now() - latest) < 60000; // 60s window
+          });
+
+          (freshState as any)[tableKey] = [...normalizedCloud, ...recentUnsyncedLocal];
+        }
+      }
+
+      db.save(freshState);
       return true;
     } catch (err) {
       return false;
@@ -389,23 +394,32 @@ export const db = {
 
     // 3. Verificação de SENHA
     // No modo Cloud, as senhas não ficam no banco local. Precisamos validar no Supabase.
-    // Criamos um client temporário que não persiste sessão para não deslogar o usuário atual.
+    if (!password) {
+      console.warn('[AUTH] Senha não fornecida.');
+      return null;
+    }
+
     const { createVerificationClient } = await import('./supabase');
     const authClient = createVerificationClient();
 
     if (authClient) {
-      console.log('[AUTH] Verificando credenciais via Cloud...');
+      console.log(`[AUTH] Verificando credenciais via Cloud para: ${normalizedEmail}...`);
       const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
         email: normalizedEmail,
         password: password
       });
 
       if (authError || !authData.user) {
-        console.warn('[AUTH] Falha na verificação Cloud:', authError?.message);
-        // Fallback para senha local para usuários criados Offline (se existir)
-        if (!user.password || user.password !== password) return null;
+        console.warn('[AUTH] Falha na verificação Cloud:', authError?.message || 'Erro desconhecido');
+        // Fallback apenas se o usuário tiver senha local (raro em ambiente cloud-sync)
+        if (user.password && user.password === password) {
+          console.log('[AUTH] Fallback para senha local funcionou ✅');
+        } else {
+          return null;
+        }
+      } else {
+        console.log('[AUTH] Credenciais validadas via Cloud ✅');
       }
-      console.log('[AUTH] Credenciais validadas via Cloud ✅');
     } else {
       // Modo Offline puro / Sem config cloud
       if (!user.password || user.password !== password) return null;
@@ -637,7 +651,7 @@ export const db = {
   subscribeToChanges: (onUpdate: () => void) => {
     const client = db.getCloudClient();
     if (!client) {
-      console.warn('[REALTIME] Client not available');
+      console.warn('[REALTIME] Client not available for subscription');
       return () => { };
     }
 
@@ -646,6 +660,10 @@ export const db = {
     const debouncedUpdate = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
+        // Verifica se o cliente ainda existe antes de tentar sincronizar
+        const activeClient = db.getCloudClient();
+        if (!activeClient) return;
+
         console.log('[REALTIME] Change detected, syncing...');
         db.syncFromCloud().then((success) => {
           if (success) {
@@ -653,7 +671,7 @@ export const db = {
             onUpdate();
           }
         });
-      }, 1000); // 1 second debounce
+      }, 300); // 300ms debounce
     };
 
     const tables = ['materials', 'financials', 'transactions', 'partners', 'cashier_sessions', 'authorization_requests'];
@@ -676,7 +694,13 @@ export const db = {
 
     return () => {
       console.log('[REALTIME] Unsubscribing global channel...');
-      client.removeChannel(channel);
+      // Proteção para evitar crash se o cliente foi invalidado
+      const currentClient = db.getCloudClient();
+      if (currentClient && channel) {
+        currentClient.removeChannel(channel).catch(err => {
+          console.warn('[REALTIME] Error removing channel:', err.message);
+        });
+      }
     };
   }
 };

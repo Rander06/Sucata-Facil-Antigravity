@@ -86,7 +86,7 @@ export const TableLayout = ({
                                     <td className={`px-6 py-4 text-right font-black ${record.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {record.valor.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                     <td className="px-6 py-4 text-center"><span className={`px-2 py-1 rounded-full text-[8px] font-black uppercase border shadow-sm ${statusInfo.color}`}>{statusInfo.label}</span></td>
                                     <td className="px-6 py-4 text-right no-print flex items-center justify-end gap-2">
-                                        {(!record.transaction_id && record.tipo !== 'vendas' && record.tipo !== 'compras') && (
+                                        {!record.transaction_id && (
                                             <>
                                                 {onEdit && (
                                                     <button

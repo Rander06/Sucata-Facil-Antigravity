@@ -599,7 +599,7 @@ Valor envolvido: ${val}`;
 
   const ColumnFilter = ({ col, placeholder }: { col: string, placeholder?: string }) => (
     <div className="mt-2 relative no-print">
-      <input type="text" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 pl-7 text-[9px] font-bold text-white outline-none focus:border-brand-success transition-all" placeholder={placeholder || "Filtrar..."} value={filters[col] || ''} onChange={e => updateFilter(col, e.target.value)} />
+      <input type="text" autoComplete="new-password" className="w-full bg-slate-950 border border-slate-800 rounded-lg p-1.5 pl-7 text-[9px] font-bold text-white outline-none focus:border-brand-success transition-all" placeholder={placeholder || "Filtrar..."} value={filters[col] || ''} onChange={e => updateFilter(col, e.target.value)} />
       <Search size={10} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-600" />
     </div>
   );
@@ -750,6 +750,7 @@ Valor envolvido: ${val}`;
                           <span className="text-[9px] font-black text-slate-500 uppercase px-2">Parceiro</span>
                           <input
                             type="text"
+                            autoComplete="new-password"
                             className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-32 min-w-0"
                             placeholder="Nome..."
                             value={filters.partner || ''}
@@ -760,6 +761,7 @@ Valor envolvido: ${val}`;
                           <span className="text-[9px] font-black text-slate-500 uppercase px-2">Desc.</span>
                           <input
                             type="text"
+                            autoComplete="new-password"
                             className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-32 min-w-0"
                             placeholder="Identificação..."
                             value={filters.description || ''}
@@ -798,6 +800,7 @@ Valor envolvido: ${val}`;
                         <span className="text-[9px] font-black text-slate-500 uppercase px-2">Material</span>
                         <input
                           type="text"
+                          autoComplete="new-password"
                           className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-48 min-w-0"
                           placeholder="Buscar material..."
                           value={filters.material_name || ''}
@@ -819,6 +822,7 @@ Valor envolvido: ${val}`;
                           <span className="text-[9px] font-black text-slate-500 uppercase px-2">Nome</span>
                           <input
                             type="text"
+                            autoComplete="new-password"
                             className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-32 min-w-0"
                             placeholder="Buscar parceiro..."
                             value={filters.partner_name_rep || ''}
@@ -829,6 +833,7 @@ Valor envolvido: ${val}`;
                           <span className="text-[9px] font-black text-slate-500 uppercase px-2">Doc</span>
                           <input
                             type="text"
+                            autoComplete="new-password"
                             className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-24 min-w-0"
                             placeholder="CPF/CNPJ..."
                             value={filters.partner_doc_rep || ''}
@@ -875,6 +880,7 @@ Valor envolvido: ${val}`;
                         <span className="text-[9px] font-black text-slate-500 uppercase px-2">Ação</span>
                         <input
                           type="text"
+                          autoComplete="new-password"
                           className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-32 min-w-0"
                           placeholder="Buscar ação..."
                           value={filters.log_action || ''}
@@ -885,6 +891,7 @@ Valor envolvido: ${val}`;
                         <span className="text-[9px] font-black text-slate-500 uppercase px-2">Detalhes</span>
                         <input
                           type="text"
+                          autoComplete="new-password"
                           className="bg-slate-950 p-1 text-[9px] font-black text-white rounded outline-none flex-1 md:flex-none md:w-48 min-w-0"
                           placeholder="Buscar narrativa..."
                           value={filters.log_detail || ''}

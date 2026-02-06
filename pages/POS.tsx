@@ -107,6 +107,7 @@ const CartInput: React.FC<CartInputProps> = ({ id, value, label, type, onChange 
         inputMode="decimal"
         placeholder={type === 'quantity' ? "Qtd" : "R$"}
         onFocus={(e) => e.target.select()}
+        autoComplete="new-password"
         className={`w-full bg-slate-950 border ${value === 0 && type === 'quantity' ? 'border-brand-warning animate-pulse' : 'border-slate-800'} p-2 rounded-xl text-xs text-white font-black text-center focus:border-brand-success outline-none transition-colors`}
         value={displayValue}
         onChange={handleChange}
@@ -124,7 +125,8 @@ const POS: React.FC = () => {
     posBuyPartnerId, setPosBuyPartnerId,
     posSellPartnerId, setPosSellPartnerId,
     posType: type, setPosType: setType,
-    posEditingRecordId: editingRecordId, setPosEditingRecordId: setEditingRecordId
+    posEditingRecordId: editingRecordId, setPosEditingRecordId: setEditingRecordId,
+    dataVersion
   } = useAppContext();
 
   const cart = type === 'buy' ? posBuyCart : posSellCart;
@@ -160,14 +162,6 @@ const POS: React.FC = () => {
   const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>([]);
   // POS state is now global via AppContext
 
-
-  // ... (Lines 93-870 remain unchanged in context, but we are replacing the state init line 91)
-  // Wait, I strictly cannot easily replace line 91 and 870 in one go if they are far apart.
-  // I will split this into two calls or use multi-replace if supported.
-  // The tool description says: "Use this tool ONLY when you are making a SINGLE CONTIGUOUS block of edits".
-  // So I must use multi_replace_file_content if I want to edit line 91 and 871.
-  // Converting this call to multi_replace...
-
   const [search, setSearchTerm] = useState('');
 
   const [activeSession, setActiveSession] = useState<CashierSession | null>(null);
@@ -183,6 +177,7 @@ const POS: React.FC = () => {
   const [openingBalanceInput, setOpeningBalanceInput] = useState('');
   const [openingBankId, setOpeningBankId] = useState('');
   const [openingTermId, setOpeningTermId] = useState('');
+  const [isOpeningConfirmationModalOpen, setIsOpeningConfirmationModalOpen] = useState(false);
 
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
   const [closingBreakdown, setClosingBreakdown] = useState<Record<string, string>>({});
@@ -292,10 +287,11 @@ const POS: React.FC = () => {
 
   const isClosePending = useMemo(() => {
     if (!activeSession) return false;
+    const sessionIdUpper = activeSession.id.toUpperCase();
     return pendingRequests.some(r =>
       r.action_key === 'FECHAR_CAIXA' &&
       r.status === 'PENDING' &&
-      r.action_label.includes(activeSession.id.toUpperCase().slice(-5))
+      r.action_label.toUpperCase().includes(sessionIdUpper)
     );
   }, [pendingRequests, activeSession]);
 
@@ -393,13 +389,15 @@ const POS: React.FC = () => {
     return { label: 'ABERTO', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', isStriked: false };
   };
 
-  // Polling for Auto-Refresh (10s)
+  // Polling for Auto-Refresh (10s) - REMOVED (Redundant and causing flicker)
+  /*
   useEffect(() => {
     const interval = setInterval(() => {
       triggerRefresh();
     }, 10000);
     return () => clearInterval(interval);
   }, []);
+  */
 
   const historyRecords = useMemo(() => {
     if (!activeSession) return [];
@@ -515,20 +513,29 @@ const POS: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
 
-    // Filtramos apenas aprovações que ainda não processamos localmente nesta sessão
-    const approvedToProcess = pendingRequests.filter(r =>
-      r.status === 'APPROVED' &&
+    // Filtramos aprovações ou negações que ainda não processamos localmente nesta sessão
+    const responsesToProcess = pendingRequests.filter(r =>
+      (r.status === 'APPROVED' || r.status === 'DENIED') &&
       r.requested_by_id === currentUser.id &&
       !processedIdsRef.current.has(r.id)
     );
 
-    if (approvedToProcess.length > 0) {
+    if (responsesToProcess.length > 0) {
       const processAll = async () => {
         let needsLocalRefresh = false;
-        for (const req of approvedToProcess) {
+        for (const req of responsesToProcess) {
           try {
             // Marco o ID imediatamente como processado para evitar que o próximo polling (2s) repita a ação
             processedIdsRef.current.add(req.id);
+
+            if (req.status === 'DENIED') {
+              if (req.action_key === 'FECHAR_CAIXA') {
+                setIsClosingModalOpen(true);
+                alert(`ENCERRAMENTO NEGADO: O pedido de fechamento para o turno #${req.action_label.split('ID: ')[1]?.split(' |')[0]?.slice(0, 8).toUpperCase()} foi negado pelo gestor.`);
+              }
+              await db.update('authorization_requests' as any, req.id, { status: 'PROCESSED' } as any);
+              continue;
+            }
 
             if (req.action_key === 'ESTORNAR_LANCAMENTO') {
               const recordId = req.action_label.split('REAL_ID: ')[1]?.split(' |')[0]?.trim();
@@ -616,8 +623,8 @@ const POS: React.FC = () => {
     }
   }, [pendingRequests, currentUser, activeSession, dynamicClosingItems, historyRecords, executeTransactionVoid, executeRecordCancel, executeManualEntryAction, executeEditRecord, executeEditOpening, executeEditPosTx, refreshData, refreshRequests]);
 
-  const loadData = useCallback(async () => {
-    setIsLoadingData(true);
+  const loadData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setIsLoadingData(true);
     const client = db.getCloudClient();
 
     try {
@@ -686,7 +693,17 @@ const POS: React.FC = () => {
     }
   }, [companyId, refreshKey]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    // Manual/Visible refresh
+    loadData(false);
+  }, [loadData, refreshKey]);
+
+  useEffect(() => {
+    // Silent background refresh triggered by dataVersion (Realtime/Sync)
+    if (dataVersion > 0) {
+      loadData(true);
+    }
+  }, [dataVersion, loadData]);
 
   const partnerMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -758,6 +775,15 @@ const POS: React.FC = () => {
       return;
     }
 
+    const valorNum = parseNumericString(openingBalanceInput);
+
+    setIsOpeningConfirmationModalOpen(true);
+  };
+
+  const confirmOpenCashier = async () => {
+    if (isOpening) return;
+    const valorNum = parseNumericString(openingBalanceInput);
+
     // AUTOMATION: Default to CARTEIRA and À VISTA (DINHEIRO)
     const targetBank = banks.find(b => b.name.toUpperCase() === 'CARTEIRA');
     // Try openingTerms first, then fallback to allTerms
@@ -767,7 +793,7 @@ const POS: React.FC = () => {
     if (!targetBank) return alert("ERRO CRÍTICO: Banco 'CARTEIRA' não encontrado. Configure-o em Bancos.");
     if (!targetTerm) return alert("ERRO CRÍTICO: Forma de Pagamento 'À VISTA (DINHEIRO)' não encontrada. Configure-a em Termos de Pagamento.");
 
-    const valorNum = parseNumericString(openingBalanceInput);
+    setIsOpeningConfirmationModalOpen(false);
     setIsOpening(true);
     try {
       const now = db.getNowISO();
@@ -1451,7 +1477,7 @@ const POS: React.FC = () => {
                                   (() => {
                                     const recordSession = allSessions.find(s => s.id === rec.caixa_id);
                                     const isFinanceLiquidation = recordSession?.type === 'finance';
-                                    if (isFinanceLiquidation) return null;
+                                    if (isFinanceLiquidation || rec.categoria === 'Abertura de Caixa') return null;
 
                                     return (
                                       <button onClick={() => { setPendingVoidRecordId(rec.id); setIsRequestAuthModalOpen(true); }} className="p-2 bg-brand-warning/10 text-brand-warning rounded-lg" title="Estornar para Pendente"><RotateCcw size={16} /></button>
@@ -1485,11 +1511,29 @@ const POS: React.FC = () => {
                 <p className="text-[10px] font-black uppercase text-slate-500">Buscando cadastros...</p>
               </div>
             ) : (
-              <form onSubmit={handleOpenCashierSubmit} className="space-y-6">
+              <form onSubmit={handleOpenCashierSubmit} className="space-y-6" autoComplete="off">
                 <div className="space-y-4">
                   <div className="space-y-1">
                     <label htmlFor="opening-balance" className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Fundo de Troco Inicial (BRL)</label>
-                    <input id="opening-balance" name="opening-balance" required autoFocus type="text" placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success transition-all" value={openingBalanceInput} onChange={e => setOpeningBalanceInput(e.target.value)} />
+                    <input
+                      id="opening-balance"
+                      name="opening-balance"
+                      required
+                      autoFocus
+                      type="text"
+                      placeholder="0,00"
+                      autoComplete="new-password"
+                      className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-white text-3xl font-black text-center outline-none focus:border-brand-success transition-all"
+                      value={openingBalanceInput}
+                      onChange={e => setOpeningBalanceInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          // Pular o enter até chegar em abrir
+                          document.getElementById('open-cashier-submit')?.focus();
+                        }
+                      }}
+                    />
                   </div>
 
                   {/* Campos de Banco e Forma removidos para automação (Carteira/Dinheiro) */}
@@ -1504,9 +1548,10 @@ const POS: React.FC = () => {
                     CANCELAR
                   </button>
                   <button
+                    id="open-cashier-submit"
                     type="submit"
-                    disabled={isOpening}
-                    className="flex-[2] py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-brand-success/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+                    disabled={isOpening || isLoadingData}
+                    className="flex-1 bg-brand-success text-white font-black uppercase tracking-widest py-5 rounded-2xl shadow-lg shadow-brand-success/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 focus:ring-4 focus:ring-brand-success/30 outline-none"
                   >
                     {isOpening ? <Loader2 className="animate-spin" size={18} /> : <Unlock size={18} />}
                     {isOpening ? 'Processando...' : (editingRecordId ? 'SOLICITAR AJUSTE' : 'CONFIRMAR ABERTURA')}
@@ -1896,6 +1941,75 @@ const POS: React.FC = () => {
             <div className="mt-8 flex gap-4 no-print">
               <button onClick={() => window.print()} className="flex-1 py-3 bg-black text-white font-black uppercase text-[10px]">Imprimir</button>
               <button onClick={() => setShowClosingPrintPreview(false)} className="flex-1 py-3 border-2 border-black font-black uppercase text-[10px]">Concluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE ABERTURA CUSTOMIZADO */}
+      {isOpeningConfirmationModalOpen && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/98 backdrop-blur-xl p-4 animate-in fade-in">
+          <div className="enterprise-card w-full max-sm p-8 text-center space-y-6 border-brand-warning/20 bg-brand-warning/5 shadow-2xl shadow-brand-warning/5 animate-in zoom-in-95">
+            <div className="w-20 h-20 bg-brand-warning/10 rounded-full flex items-center justify-center mx-auto text-brand-warning border border-brand-warning/20">
+              <AlertTriangle size={40} />
+            </div>
+
+            <div className="space-y-4">
+              <h2 className="text-xl font-black text-white uppercase tracking-tight">
+                TEM CERTEZA QUE DESEJA ABRIR O CAIXA COM VALOR DE:
+              </h2>
+
+              <div className="py-4">
+                <p className="text-4xl font-black text-brand-warning">
+                  R$ {formatCurrency(parseNumericString(openingBalanceInput))}
+                </p>
+              </div>
+
+              <p className="text-brand-error text-sm font-black uppercase tracking-widest animate-pulse">
+                essa ação é ireversivel!
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 pt-4">
+              <button
+                onClick={confirmOpenCashier}
+                autoFocus
+                className="w-full py-5 bg-brand-warning text-black rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-warning/20 hover:scale-[1.02] active:scale-95 transition-all outline-none focus:ring-4 focus:ring-brand-warning/40"
+              >
+                CONFIRMAR ABERTURA
+              </button>
+              <button
+                onClick={() => setIsOpeningConfirmationModalOpen(false)}
+                className="w-full py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px] tracking-widest hover:text-white transition-all"
+              >
+                CANCELAR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BLOQUEIO DE TELA PARA AGUARDANDO AUTORIZAÇÃO DE FECHAMENTO */}
+      {isClosePending && (
+        <div className="absolute inset-0 z-[200] flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl p-8 text-center animate-in fade-in">
+          <div className="enterprise-card p-10 max-w-md space-y-8 border-brand-warning/20 bg-brand-warning/5 shadow-2xl shadow-brand-warning/10">
+            <div className="w-24 h-24 bg-brand-warning/10 rounded-full flex items-center justify-center mx-auto text-brand-warning border border-brand-warning/20 relative">
+              <div className="absolute inset-0 rounded-full border-4 border-brand-warning/20 border-t-brand-warning animate-spin" />
+              <Lock size={40} className="animate-pulse" />
+            </div>
+
+            <div className="space-y-4">
+              <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Turno Bloqueado</h2>
+              <p className="text-slate-400 text-sm leading-relaxed font-medium">
+                A solicitação de fechamento foi enviada. O terminal permanecerá bloqueado até que um gestor aprove ou negue a operação remotamente.
+              </p>
+            </div>
+
+            <div className="pt-4 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-900/50 rounded-full border border-slate-800">
+                <span className="w-2 h-2 bg-brand-warning rounded-full animate-ping" />
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Aguardando Resposta Remota...</span>
+              </div>
             </div>
           </div>
         </div>

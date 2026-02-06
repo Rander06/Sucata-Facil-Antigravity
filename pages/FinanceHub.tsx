@@ -70,7 +70,7 @@ const getStatusInfo = (record: FinancialRecord) => {
 
 
 const FinanceHub: React.FC = () => {
-  const { currentUser, currentCompany, pendingRequests, refreshRequests } = useAppContext();
+  const { currentUser, currentCompany, pendingRequests, refreshRequests, refreshData } = useAppContext();
   const companyId = currentUser?.companyId || currentUser?.company_id || null;
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -104,44 +104,6 @@ const FinanceHub: React.FC = () => {
 
 
 
-  const getSystemValue = (itemId: string, group: string) => {
-    if (!auditModal.session) return 0;
-    const session = auditModal.session;
-    const records = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === session.id && f.status !== 'reversed');
-
-    // 1. Campos Físicos (DINHEIRO / CHEQUE)
-    if (itemId === 'physical_cash') return db.calculateExpectedValue(companyId, session, 'vista', [], financeCategories, 'ENTRADA');
-    if (itemId === 'physical_check') return db.calculateExpectedValue(companyId, session, 'cheque', [], financeCategories, 'ENTRADA');
-
-    // 2. Campos Dinâmicos de Categoria (cat_<categoria>_<natureza>)
-    if (itemId.startsWith('cat_')) {
-      const parts = itemId.split('_');
-      const natureza = parts[parts.length - 1]; // Última parte é a natureza
-      const categoria = parts.slice(1, -1).join('_'); // Tudo entre cat_ e _natureza
-
-      return records
-        .filter(f => f.categoria === categoria && f.natureza === natureza)
-        .reduce((sum, r) => sum + r.valor, 0);
-    }
-
-    // 3. Campos Dinâmicos de Payment Term (term_<nome>_<natureza>)
-    if (itemId.startsWith('term_')) {
-      const parts = itemId.split('_');
-      const natureza = parts[parts.length - 1]; // Última parte é a natureza
-      const termName = parts.slice(1, -1).join('_'); // Tudo entre term_ e _natureza
-
-      return records
-        .filter(f => {
-          const termId = f.payment_term_id || f.paymentTermId;
-          if (!termId) return false;
-          const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
-          return term && term.name === termName && f.natureza === natureza;
-        })
-        .reduce((sum, r) => sum + r.valor, 0);
-    }
-
-    return 0;
-  };
 
   const handleAuditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -242,6 +204,8 @@ const FinanceHub: React.FC = () => {
   const [activeFinanceSession, setActiveFinanceSession] = useState<CashierSession | null>(null);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
   const [financeOpeningBalance, setFinanceOpeningBalance] = useState('');
+  const [isOpeningConfirmationModalOpen, setIsOpeningConfirmationModalOpen] = useState(false);
+  const [isOpeningShift, setIsOpeningShift] = useState(false);
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
   const [closingBreakdown, setClosingBreakdown] = useState<Record<string, string>>({});
   const [operationalTime, setOperationalTime] = useState('');
@@ -250,6 +214,209 @@ const FinanceHub: React.FC = () => {
   const [pendingClosePayload, setPendingClosePayload] = useState<any>(null);
   const [pendingCloseSessionId, setPendingCloseSessionId] = useState('');
   const closingFormRef = useRef<HTMLFormElement>(null);
+
+  const isClosePending = useMemo(() => {
+    if (!activeFinanceSession) return false;
+    const sessionIdUpper = activeFinanceSession.id.toUpperCase();
+    return pendingRequests.some(r =>
+      r.action_key === RemoteAuthorization.AUTH_FINANCE_CLOSE_CASHIER &&
+      r.status === 'PENDING' &&
+      r.action_label.toUpperCase().includes(sessionIdUpper)
+    );
+  }, [pendingRequests, activeFinanceSession]);
+
+  // PERFORMANCE: Pre-filtragem de registros para a auditoria ativa
+  const auditSessionRecords = useMemo(() => {
+    if (!auditModal.session) return [];
+    return allFinancialRecords.filter(f => f.caixa_id === auditModal.session!.id && f.status !== 'reversed');
+  }, [allFinancialRecords, auditModal.session?.id]);
+
+  /**
+   * @google/genai Senior Frontend Engineer:
+   * Gera dinamicamente os campos de auditoria baseados nas transações reais do turno.
+   * Espelha a lógica do POS.tsx para consistência UX.
+   */
+  const auditItems = useMemo(() => {
+    const session = auditModal.session;
+    if (!session) return [];
+
+    const items: { id: string, label: string, group: 'ENTRADA' | 'SAIDA' | 'FISICO' | 'ENTRADA_INFO' | 'SAIDA_INFO', icon: any }[] = [];
+
+    // GRUPO FISICO (Mantém inalterado - sempre presente)
+    items.push({ id: 'physical_cash', label: 'DINHEIRO EM MÃOS', group: 'FISICO', icon: Banknote });
+    items.push({ id: 'physical_check', label: 'CHEQUE EM MÃOS', group: 'FISICO', icon: Coins });
+
+    // Buscar todos os registros financeiros deste turno
+    const shiftRecords = auditSessionRecords;
+
+    // Categorias excluídas
+    const excludedCategories = ['Compra de Materiais', 'Venda de Materiais'];
+
+    // Processar categorias únicas por natureza
+    const categoryMap = new Map<string, { natureza: string, total: number }>();
+
+    shiftRecords.forEach(rec => {
+      if (excludedCategories.includes(rec.categoria)) return;
+
+      const key = `cat_${rec.categoria}_${rec.natureza}`;
+      const existing = categoryMap.get(key);
+      if (existing) {
+        existing.total += rec.valor;
+      } else {
+        categoryMap.set(key, { natureza: rec.natureza, total: rec.valor });
+      }
+    });
+
+    // Processar payment terms únicos por natureza
+    const termMap = new Map<string, { natureza: string, total: number }>();
+
+    shiftRecords.forEach(rec => {
+      // Pular se não tem payment_term_id
+      if (!rec.payment_term_id && !rec.paymentTermId) return;
+
+      const termId = rec.payment_term_id || rec.paymentTermId;
+      const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
+
+      if (!term) return;
+      const termName = term.name || '';
+      if (termName === 'À VISTA (DINHEIRO)' || termName === 'À VISTA' || termName.toUpperCase().includes('CHEQUE')) return;
+
+      const key = `term_${termName}_${rec.natureza}`;
+      const existing = termMap.get(key);
+      if (existing) {
+        existing.total += rec.valor;
+      } else {
+        termMap.set(key, { natureza: rec.natureza, total: rec.valor });
+      }
+    });
+
+    // Adicionar categorias ao array de items
+    categoryMap.forEach((value, key) => {
+      const categoria = key.replace(`cat_`, '').replace(`_${value.natureza}`, '');
+      items.push({
+        id: key,
+        label: (categoria || '').toUpperCase(),
+        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO',
+        icon: value.natureza === 'ENTRADA' ? ArrowUpCircle : ArrowDownCircle
+      });
+    });
+
+    // Adicionar payment terms ao array de items
+    termMap.forEach((value, key) => {
+      const termName = key.replace(`term_`, '').replace(`_${value.natureza}`, '');
+      items.push({
+        id: key,
+        label: `${(termName || '').toUpperCase()}`,
+        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO',
+        icon: CreditCard
+      });
+    });
+
+    return items;
+  }, [auditModal.session, auditSessionRecords, allPaymentTerms]);
+
+  const getSystemValue = (itemId: string, group: string) => {
+    if (!auditModal.session) return 0;
+    const session = auditModal.session;
+
+    // 1. Campos Físicos (DINHEIRO / CHEQUE) - Calculados localmente para performance máxima
+    if (itemId === 'physical_cash' || itemId === 'physical_check') {
+      const isCheck = itemId === 'physical_check';
+      let total = isCheck ? 0 : (session.openingBalance || session.opening_balance || 0);
+
+      auditSessionRecords.forEach(r => {
+        if (r.categoria === 'Abertura de Caixa') return;
+        const isEntry = ['vendas', 'suprimento', 'entrada', 'pagamento', 'sell'].includes(String(r.tipo).toLowerCase());
+        const tId = r.paymentTermId || r.payment_term_id;
+        const term = allPaymentTerms.find(t => t.id === tId || t.uuid === tId);
+
+        const isDinheiro = (term && (term.name || '').toUpperCase().includes('DINHEIRO')) || (!tId && !term);
+        const isCheque = (term && (term.name || '').toUpperCase().includes('CHEQUE'));
+
+        if (isCheck && isCheque) {
+          if (isEntry && r.status === 'paid') total += r.valor;
+        } else if (!isCheck && isDinheiro) {
+          if (isEntry) { if (r.status === 'paid') total += r.valor; } else { total -= r.valor; }
+        }
+      });
+      return total;
+    }
+
+    // 2. Campos Dinâmicos de Categoria (cat_<categoria>_<natureza>)
+    if (itemId.startsWith('cat_')) {
+      const parts = itemId.split('_');
+      const natureza = parts[parts.length - 1];
+      const categoria = parts.slice(1, -1).join('_');
+
+      return auditSessionRecords
+        .filter(f => f.categoria === categoria && f.natureza === natureza)
+        .reduce((sum, r) => sum + r.valor, 0);
+    }
+
+    // 3. Campos Dinâmicos de Payment Term (term_<nome>_<natureza>)
+    if (itemId.startsWith('term_')) {
+      const parts = itemId.split('_');
+      const natureza = parts[parts.length - 1];
+      const termName = parts.slice(1, -1).join('_');
+
+      return auditSessionRecords
+        .filter(f => {
+          const termId = f.payment_term_id || f.paymentTermId;
+          if (!termId) return false;
+          const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
+          return term && term.name === termName && f.natureza === natureza;
+        })
+        .reduce((sum, r) => sum + r.valor, 0);
+    }
+
+    return 0;
+  };
+
+  // PERFORMANCE: Pre-calcula todos os valores de sistema para evitar processamento no render (Lag de Scroll)
+  const computedAuditValues = useMemo(() => {
+    if (!auditModal.session || !auditItems.length) return {};
+    const values: Record<string, number> = {};
+    auditItems.forEach(item => {
+      values[item.id] = getSystemValue(item.id, item.group);
+    });
+    return values;
+  }, [auditModal.session, auditItems, auditSessionRecords, allPaymentTerms]);
+
+  // PERFORMANCE: Pre-calcula os resumos da auditoria para evitar processamento no render
+  const auditModalSummaries = useMemo(() => {
+    if (!auditModal.show || !auditItems.length) return { physical: 0, entries: 0, exits: 0 };
+
+    const physical = auditItems.filter(i => i.group === 'FISICO').reduce((sum, i) => sum + parseNumericString(auditModal.auditedBreakdown[i.id] || '0'), 0);
+    const entries = auditItems.filter(i => i.group === 'ENTRADA_INFO').reduce((sum, i) => sum + parseNumericString(auditModal.auditedBreakdown[i.id] || '0'), 0);
+    const exits = auditItems.filter(i => i.group === 'SAIDA_INFO').reduce((sum, i) => sum + parseNumericString(auditModal.auditedBreakdown[i.id] || '0'), 0);
+
+    return { physical, entries, exits };
+  }, [auditModal.show, auditModal.auditedBreakdown, auditItems]);
+
+  // PERFORMANCE: Pre-calcula filtros da tabela de auditoria para evitar loops no render
+  const auditFilterOptions = useMemo(() => {
+    if (!auditModal.session) return { uniqueStatuses: [], uniqueTerms: [] };
+
+    const sessionRecords = allFinancialRecords.filter(r => r.caixa_id === auditModal.session?.id);
+
+    const statuses = new Set<string>();
+    const terms = new Set<string>();
+
+    sessionRecords.forEach(rec => {
+      const statusInfo = getStatusInfo(rec);
+      statuses.add(statusInfo.label);
+
+      const term = allPaymentTerms.find(t => t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
+      let termName = term?.name || (rec.liquidation_date ? 'À VISTA (DINHEIRO)' : '');
+      if (termName === 'À VISTA') termName = 'À VISTA (DINHEIRO)';
+      if (termName && termName !== '---') terms.add(termName);
+    });
+
+    return {
+      uniqueStatuses: Array.from(statuses).sort(),
+      uniqueTerms: Array.from(terms).sort()
+    };
+  }, [auditModal.session, allFinancialRecords, allPaymentTerms]);
 
   // EFICIENTE: Mantém o cronômetro do turno ativo
   useEffect(() => {
@@ -333,9 +500,19 @@ const FinanceHub: React.FC = () => {
     return { expected, totalFisico, totalEntradasInfo, totalSaidasInfo };
   }, [activeFinanceSession, closingBreakdown, dynamicClosingItems, companyId, financeCategories]);
 
-  const handleOpenFinanceShift = async (e: React.FormEvent) => {
+  const handleOpeningKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const form = e.currentTarget.form;
+      if (!form) return;
+      const submitBtn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+      if (submitBtn) submitBtn.focus();
+    }
+  };
+
+  const handleOpenFinanceShiftSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) return;
+    if (!currentUser || isOpeningShift) return;
 
     // Check if user already has an open POS or Finance session
     const existingSession = cashierSessions.find(s =>
@@ -348,6 +525,14 @@ const FinanceHub: React.FC = () => {
       return;
     }
 
+    setIsOpeningConfirmationModalOpen(true);
+  };
+
+  const confirmOpenFinanceShift = async () => {
+    if (!currentUser || isOpeningShift) return;
+
+    setIsOpeningConfirmationModalOpen(false);
+    setIsOpeningShift(true);
     try {
       const balance = parseNumericString(financeOpeningBalance);
       const newSession: Partial<CashierSession> = {
@@ -397,23 +582,16 @@ const FinanceHub: React.FC = () => {
       });
 
       // AUTOMATIC WALLET WITHDRAWAL (SAÍDA DA CARTEIRA)
-      // If opening balance > 0, we must withdraw from "CARTEIRA" bank to fund the cashier
       if (balance > 0) {
         try {
-          // 1. Find the "CARTEIRA" Partner or Bank to link (Optional, usually we just log to wallet_transactions)
-          // Ideally we look for a bank named 'CARTEIRA' to get its ID, or just use a generic reference.
-          // For now, we will just insert into wallet_transactions with category 'SAÍDA' and description.
-          // IF we need to link to a Partner, we could look for 'CARTEIRA' partner?
-          // Usually wallet_transactions has 'parceiro' as string name.
-
           const walletPayload: any = {
             company_id: companyId!,
             user_id: currentUser.id,
             valor_saida: balance,
             valor_entrada: 0,
-            saldo_real: 0, // Will be calculated by trigger or backend usually, or ignored in UI
+            saldo_real: 0,
             categoria: 'TRANSFERÊNCIA',
-            parceiro: 'CARTEIRA', // Origin
+            parceiro: 'CARTEIRA',
             descricao: 'TRANSFERÊNCIA P/ CAIXA FINANCEIRO (ABERTURA)',
             payment_term_id: null,
             operador_id: currentUser.id,
@@ -422,20 +600,19 @@ const FinanceHub: React.FC = () => {
             updated_at: db.getNowISO(),
             status: 'completed'
           };
-
           await db.insert('walletTransactions', walletPayload);
         } catch (wErr) {
           console.error("Failed to create wallet withdrawal for opening balance", wErr);
-          // Non-blocking, but good to know
         }
       }
 
       setShowOpenShiftModal(false);
       setFinanceOpeningBalance('');
-      alert("Caixa Financeiro aberto com sucesso! Transferência da Carteira realizada.");
       triggerRefresh();
     } catch (err: any) {
       alert("Erro ao abrir caixa: " + err.message);
+    } finally {
+      setIsOpeningShift(false);
     }
   };
 
@@ -459,6 +636,15 @@ const FinanceHub: React.FC = () => {
       setIsClosingModalOpen(false);
       setPendingClosePayload(null);
       setPendingCloseSessionId('');
+
+      // RESET TOTAL DAS TELAS (Retornar ao dashboard do Hub conforme imagem)
+      setActiveModal(null);
+      setShowWalletManualEntry(false);
+      setShowNewTitleModal(false);
+      setLiquidationModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' });
+      setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {} });
+      setAuditFilterSessionId('');
+
       alert("Turno Financeiro encerrado com sucesso! Aguardando conferência do gestor.");
       triggerRefresh();
     } catch (err: any) {
@@ -838,6 +1024,20 @@ const FinanceHub: React.FC = () => {
       setFinanceCategories(allCategories);
       setTeamUsers(users);
 
+      // 1. CARREGA DADOS LOCAIS (IMEDIATO) - Performance Enterprise
+      const localFinancials = db.queryTenant<FinancialRecord>('financials', companyId);
+      const localWallet = db.queryTenant<WalletTransaction>('walletTransactions' as any, companyId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const localSessions = db.queryTenant<CashierSession>('cashierSessions', companyId);
+
+      setAllFinancialRecords(localFinancials);
+      setWalletTransactions(localWallet);
+      setCashierSessions(localSessions);
+
+      const myLocalActive = localSessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
+      setActiveSession(myLocalActive || null);
+      setActiveFinanceSession(myLocalActive?.type === 'finance' ? myLocalActive : null);
+
+      // 2. SINCRONIZA COM CLOUD SE DISPONÍVEL
       if (client && companyId) {
         try {
           const { data: finData, error: finError } = await client.from('financials').select('*').eq('company_id', companyId);
@@ -855,38 +1055,10 @@ const FinanceHub: React.FC = () => {
             setCashierSessions(normSessions);
             const myActive = normSessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
             setActiveSession(myActive || null);
-
-            // Sets Active Finance Session if matches type
-            if (myActive && myActive.type === 'finance') {
-              setActiveFinanceSession(myActive);
-            } else {
-              setActiveFinanceSession(null);
-            }
+            setActiveFinanceSession(myActive?.type === 'finance' ? myActive : null);
           }
         } catch (fetchErr: any) {
-          console.warn("Supabase fetch failed (Network/Auth), falling back to local storage:", fetchErr.message);
-          // Fallback to local data
-          setAllFinancialRecords(db.queryTenant<FinancialRecord>('financials', companyId));
-          setWalletTransactions(db.queryTenant<WalletTransaction>('walletTransactions' as any, companyId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-          const sessions = db.queryTenant<CashierSession>('cashierSessions', companyId);
-          setCashierSessions(sessions);
-          const myActive = sessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
-          setActiveSession(myActive || null);
-          setActiveFinanceSession(myActive?.type === 'finance' ? myActive : null);
-        }
-      } else {
-        setAllFinancialRecords(db.queryTenant<FinancialRecord>('financials', companyId));
-        setWalletTransactions(db.queryTenant<WalletTransaction>('walletTransactions' as any, companyId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-        const sessions = db.queryTenant<CashierSession>('cashierSessions', companyId);
-        setCashierSessions(sessions);
-        const myActive = sessions.find(s => (s.userId === currentUser?.id || s.user_id === currentUser?.id) && s.status === 'open');
-        setActiveSession(myActive || null);
-
-        // Sets Active Finance Session if matches type
-        if (myActive && myActive.type === 'finance') {
-          setActiveFinanceSession(myActive);
-        } else {
-          setActiveFinanceSession(null);
+          console.warn("Supabase sync partial failure, keeping local data:", fetchErr.message);
         }
       }
     } catch (err: any) {
@@ -912,10 +1084,10 @@ const FinanceHub: React.FC = () => {
       approvedAndMine.forEach(async (req) => {
         processedAuthIds.current.add(req.id);
         try {
-          if (req.action_key === 'CANCELAR_TRANSACAO_CARTEIRA') {
+          if (req.action_key === RemoteAuthorization.AUTH_FINANCE_EXTRACT_DELETE) {
             const txId = req.action_label.split('ID: ')[1];
             executeDeleteTransaction(txId);
-          } else if (req.action_key === 'LANCAMENTO_MANUAL_CARTEIRA' || req.action_key === 'EDITAR_TRANSACAO_CARTEIRA') {
+          } else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_EXTRACT_MANUAL_OUT || req.action_key === RemoteAuthorization.AUTH_FINANCE_EXTRACT_EDIT) {
             const jsonPart = req.action_label.split('JSON: ')[1];
             if (jsonPart) {
               const data = JSON.parse(jsonPart);
@@ -925,7 +1097,7 @@ const FinanceHub: React.FC = () => {
             const txId = req.action_label.split('ID: ')[1];
             const tx = walletTransactions.find(t => t.id === txId || t.uuid === txId);
             if (tx) executeReverseSystemTransaction(tx);
-          } else if (req.action_key === 'ESTORNAR_LIQUIDACAO') {
+          } else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_TITLE_REVERSE) {
             const match = req.action_label.match(/ID: ([a-f0-9-]+)/i);
             if (match && match[1]) {
               const record = allFinancialRecords.find(f => f.id === match[1]);
@@ -935,7 +1107,7 @@ const FinanceHub: React.FC = () => {
                 console.error("ESTORNAR_LIQUIDACAO: Título não encontrado no estado local:", match[1]);
               }
             }
-          } else if (req.action_key === 'ESTORNAR_AUDITORIA') {
+          } else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_AUDIT_REVERSE) {
             const match = req.action_label.match(/TURNO: ([a-f0-9-]+)/i);
             if (match && match[1]) {
               const session = cashierSessions.find(s => s.id === match[1]);
@@ -945,13 +1117,13 @@ const FinanceHub: React.FC = () => {
                 console.error("ESTORNAR_AUDITORIA: Sessão não encontrada:", match[1]);
               }
             }
-          } else if (req.action_key === 'SALVAR_EDICAO_FINANCEIRO') {
+          } else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_TITLE_EDIT) {
             const jsonPart = req.action_label.split('JSON: ')[1];
             if (jsonPart) {
               const data = JSON.parse(jsonPart);
               executeCommitEditTitle(data);
             }
-          } else if (req.action_key === 'EXCLUIR_LIQUIDACAO') {
+          } else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_TITLE_DELETE) {
             const match = req.action_label.match(/ID: ([a-f0-9-]+)/i);
             if (match && match[1]) {
               const record = allFinancialRecords.find(f => f.id === match[1]);
@@ -961,11 +1133,36 @@ const FinanceHub: React.FC = () => {
                 console.error("EXCLUIR_LIQUIDACAO: Título não encontrado no estado local:", match[1]);
               }
             }
+          } else if (req.action_key === RemoteAuthorization.AUTH_FINANCE_CLOSE_CASHIER) {
+            const jsonPart = req.action_label.split('JSON: ')[1];
+            const sessionPart = req.action_label.split('ID: ')[1]?.split(' |')[0];
+            if (jsonPart && sessionPart) {
+              const payload = JSON.parse(jsonPart);
+              await executeFinalCloseFinanceShift(payload, sessionPart);
+            }
           }
           // Mark as PROCESSED to avoid re-triggering
           await db.update('authorization_requests' as any, req.id, { status: 'PROCESSED' } as any);
           refreshRequests();
         } catch (e) { console.error("Error processing auth request", e); }
+      });
+    }
+
+    const deniedAndMine = pendingRequests.filter(r =>
+      r.status === 'DENIED' &&
+      r.requested_by_id === currentUser.id &&
+      !processedAuthIds.current.has(r.id)
+    );
+
+    if (deniedAndMine.length > 0) {
+      deniedAndMine.forEach(async (req) => {
+        processedAuthIds.current.add(req.id);
+        if (req.action_key === RemoteAuthorization.AUTH_FINANCE_CLOSE_CASHIER) {
+          alert("Fechamento negado pelo gestor. Corrija os valores e tente novamente.");
+          setIsClosingModalOpen(true);
+        }
+        await db.update('authorization_requests' as any, req.id, { status: 'PROCESSED' } as any);
+        refreshRequests();
       });
     }
   }, [pendingRequests, currentUser, walletTransactions, allFinancialRecords]);
@@ -1012,7 +1209,7 @@ const FinanceHub: React.FC = () => {
     const interval = setInterval(() => {
       console.log("Polling: Auto-refreshing FinanceHub data...");
       triggerRefresh();
-    }, 10000);
+    }, 300000);
 
     const handleFocus = () => {
       console.log("Window Focus: Refreshing FinanceHub...");
@@ -1122,89 +1319,6 @@ const FinanceHub: React.FC = () => {
     });
   }, [financeCategories, walletForm.tipo]);
 
-  /**
-   * @google/genai Senior Frontend Engineer:
-   * Gera dinamicamente os campos de auditoria baseados nas transações reais do turno.
-   * Espelha a lógica do POS.tsx para consistência UX.
-   */
-  const auditItems = useMemo(() => {
-    const session = auditModal.session;
-    if (!session) return [];
-
-    const items: { id: string, label: string, group: 'ENTRADA' | 'SAIDA' | 'FISICO' | 'ENTRADA_INFO' | 'SAIDA_INFO', icon: any }[] = [];
-
-    // GRUPO FISICO (Mantém inalterado - sempre presente)
-    items.push({ id: 'physical_cash', label: 'DINHEIRO EM MÃOS', group: 'FISICO', icon: Banknote });
-    items.push({ id: 'physical_check', label: 'CHEQUE EM MÃOS', group: 'FISICO', icon: Coins });
-
-    // Buscar todos os registros financeiros deste turno
-    const shiftRecords = db.queryTenant<FinancialRecord>('financials', companyId, f => f.caixa_id === session.id);
-
-    // Categorias excluídas
-    const excludedCategories = ['Compra de Materiais', 'Venda de Materiais'];
-
-    // Processar categorias únicas por natureza
-    const categoryMap = new Map<string, { natureza: string, total: number }>();
-
-    shiftRecords.forEach(rec => {
-      if (excludedCategories.includes(rec.categoria)) return;
-
-      const key = `cat_${rec.categoria}_${rec.natureza}`;
-      const existing = categoryMap.get(key);
-      if (existing) {
-        existing.total += rec.valor;
-      } else {
-        categoryMap.set(key, { natureza: rec.natureza, total: rec.valor });
-      }
-    });
-
-    // Processar payment terms únicos por natureza
-    const termMap = new Map<string, { natureza: string, total: number }>();
-
-    shiftRecords.forEach(rec => {
-      // Pular se não tem payment_term_id
-      if (!rec.payment_term_id && !rec.paymentTermId) return;
-
-      const termId = rec.payment_term_id || rec.paymentTermId;
-      const term = allPaymentTerms.find(t => t.id === termId || t.uuid === termId);
-
-      if (!term) return;
-      const termName = term.name || '';
-      if (termName === 'À VISTA (DINHEIRO)' || termName === 'À VISTA' || termName.toUpperCase().includes('CHEQUE')) return;
-
-      const key = `term_${termName}_${rec.natureza}`;
-      const existing = termMap.get(key);
-      if (existing) {
-        existing.total += rec.valor;
-      } else {
-        termMap.set(key, { natureza: rec.natureza, total: rec.valor });
-      }
-    });
-
-    // Adicionar categorias ao array de items
-    categoryMap.forEach((value, key) => {
-      const categoria = key.replace(`cat_`, '').replace(`_${value.natureza}`, '');
-      items.push({
-        id: key,
-        label: (categoria || '').toUpperCase(),
-        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO',
-        icon: value.natureza === 'ENTRADA' ? ArrowUpCircle : ArrowDownCircle
-      });
-    });
-
-    // Adicionar payment terms ao array de items
-    termMap.forEach((value, key) => {
-      const termName = key.replace(`term_`, '').replace(`_${value.natureza}`, '');
-      items.push({
-        id: key,
-        label: `${(termName || '').toUpperCase()}`,
-        group: value.natureza === 'ENTRADA' ? 'ENTRADA_INFO' : 'SAIDA_INFO',
-        icon: CreditCard
-      });
-    });
-
-    return items;
-  }, [auditModal.session, companyId, allPaymentTerms]);
 
   const executeWalletManualSubmit = async (data: any) => {
     try {
@@ -1395,6 +1509,25 @@ const FinanceHub: React.FC = () => {
           created_at: now
         });
         runningBalance += valVista;
+
+        // OTIMISMO: Atualiza o estado local para o extrato refletir a mudança instantaneamente
+        const newVistaTx: WalletTransaction = {
+          id: `tmp-${Date.now()}-vista`,
+          company_id: companyId!,
+          user_id: currentUser?.id,
+          operador_id: session.user_id || session.userId,
+          operador_name: session.user_name || session.userName,
+          categoria: 'CONFERÊNCIA DE CAIXA',
+          parceiro: bankNameCash,
+          payment_term_id: idDinheiro,
+          descricao: `DEPÓSITO MASTER [DINHEIRO] - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
+          valor_entrada: valVista,
+          valor_saida: 0,
+          saldo_real: runningBalance,
+          created_at: now,
+          status: 'completed'
+        } as any;
+        setWalletTransactions(prev => [newVistaTx, ...prev]);
       }
 
       // 3. Lançamento individual para CHEQUE (se houver valor informado)
@@ -1413,7 +1546,28 @@ const FinanceHub: React.FC = () => {
           saldo_real: runningBalance + valCheque,
           created_at: now
         });
+        runningBalance += valCheque;
+
+        // OTIMISMO: Atualiza o estado local para o extrato refletir a mudança instantaneamente
+        const newChequeTx: WalletTransaction = {
+          id: `tmp-${Date.now()}-cheque`,
+          company_id: companyId!,
+          user_id: currentUser?.id,
+          operador_id: session.user_id || session.userId,
+          operador_name: session.user_name || session.userName,
+          categoria: 'CONFERÊNCIA DE CAIXA',
+          parceiro: bankNameCheck,
+          payment_term_id: idCheque,
+          descricao: `DEPÓSITO MASTER [CHEQUE] - TURNO #${session.id.slice(0, 6).toUpperCase()}`,
+          valor_entrada: valCheque,
+          valor_saida: 0,
+          saldo_real: runningBalance,
+          created_at: now,
+          status: 'completed'
+        } as any;
+        setWalletTransactions(prev => [newChequeTx, ...prev]);
       }
+
 
       // 4. Fallback: Log de auditoria para turno sem saldo físico
       if (valVista === 0 && valCheque === 0) {
@@ -1443,7 +1597,13 @@ const FinanceHub: React.FC = () => {
       );
 
       setAuditModal({ show: false, session: null, bankNameCash: '', bankNameCheck: '', auditedBreakdown: {} });
+
+      // Sincronização e Refresh Imediato
+      await db.pushStateToCloud();
       triggerRefresh();
+      refreshRequests();
+      refreshData();
+
       alert("Auditoria finalizada. Valores depositados separadamente por meio de pagamento.");
     } catch (err: any) {
       alert("Falha no DepÃ³sito Master: " + (err.message || err));
@@ -1674,7 +1834,7 @@ const FinanceHub: React.FC = () => {
             <p className="text-slate-400 text-[10px] md:text-sm mt-1 font-medium uppercase tracking-widest leading-relaxed">Movimentações operacionais e liquidez cloud.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            {activeFinanceSession ? (
+            {activeFinanceSession && !isClosePending ? (
               <button
                 onClick={handleCloseFinanceShift}
                 className="px-4 py-2 bg-brand-warning/10 text-brand-warning border border-brand-warning/30 hover:bg-brand-warning/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
@@ -1683,10 +1843,23 @@ const FinanceHub: React.FC = () => {
               </button>
             ) : (
               <button
-                onClick={() => setShowOpenShiftModal(true)}
-                className="px-4 py-2 bg-brand-success/10 text-brand-success border border-brand-success/30 hover:bg-brand-success/20 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all"
+                onClick={() => !isClosePending && setShowOpenShiftModal(true)}
+                disabled={isClosePending}
+                className={`px-4 py-2 rounded-xl font-black uppercase text-[10px] tracking-widest flex items-center gap-2 transition-all ${isClosePending
+                  ? "bg-slate-900 border border-brand-warning/30 text-slate-400 cursor-not-allowed"
+                  : "bg-brand-success/10 text-brand-success border border-brand-success/30 hover:bg-brand-success/20"
+                  }`}
               >
-                <Zap size={16} /> Abrir Caixa Financeiro
+                {isClosePending ? (
+                  <>
+                    <Clock size={16} className="text-brand-warning animate-spin" />
+                    Aguardando Liberação de Fechamento...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={16} /> Abrir Caixa Financeiro
+                  </>
+                )}
               </button>
             )}
 
@@ -1727,7 +1900,7 @@ const FinanceHub: React.FC = () => {
               <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">Sessão Exclusiva para Tesouraria</p>
             </div>
 
-            <form onSubmit={handleOpenFinanceShift} className="space-y-4">
+            <form onSubmit={handleOpenFinanceShiftSubmit} className="space-y-4" autoComplete="off">
               <div>
                 <label htmlFor="financeOpeningBalance" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Fundo de Troco (Inicial)</label>
                 <div className="relative">
@@ -1737,10 +1910,12 @@ const FinanceHub: React.FC = () => {
                     name="financeOpeningBalance"
                     type="text"
                     required
+                    autoComplete="new-password"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pl-10 text-white font-black text-lg outline-none focus:border-brand-success transition-all"
                     placeholder="0,00"
                     value={financeOpeningBalance}
                     onChange={e => setFinanceOpeningBalance(e.target.value)}
+                    onKeyDown={handleOpeningKeyDown}
                   />
                 </div>
               </div>
@@ -1751,6 +1926,213 @@ const FinanceHub: React.FC = () => {
               >
                 <CheckCircle2 size={20} /> Confirmar Abertura
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* NOVO TÍTULO MODAL */}
+      {showNewTitleModal && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in overflow-y-auto">
+          <div className="enterprise-card w-full max-w-4xl my-auto overflow-hidden shadow-2xl border-brand-success/30 animate-in zoom-in-95 bg-slate-900 shadow-[0_0_50px_-12px_rgba(16,185,129,0.2)]">
+            <div className="p-6 border-b border-slate-800 bg-brand-success/5 flex justify-between items-center">
+              <h3 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+                <PlusSquare className="text-brand-success" size={24} />
+                Novo Título (Provisão)
+              </h3>
+              <button onClick={() => setShowNewTitleModal(false)} className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all">
+                <X size={24} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateTitle} className="p-8 space-y-8" autoComplete="off">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {/* NATUREZA SWITCH */}
+                <div className="col-span-1 md:col-span-3 flex justify-center pb-2">
+                  <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800 shadow-inner">
+                    <button
+                      type="button"
+                      onClick={() => setNewTitleForm({ ...newTitleForm, natureza: 'SAIDA', tipo: 'despesa' })}
+                      className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-300 ${newTitleForm.natureza === 'SAIDA' ? 'bg-brand-error text-white shadow-xl scale-105' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                      A Pagar (Saída)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewTitleForm({ ...newTitleForm, natureza: 'ENTRADA', tipo: 'entrada' })}
+                      className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-300 ${newTitleForm.natureza === 'ENTRADA' ? 'bg-brand-success text-brand-dark shadow-xl scale-105' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                      A Receber (Entrada)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="modal-newTitle-categoria" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Categoria Financeira</label>
+                  <select
+                    id="modal-newTitle-categoria"
+                    name="categoria"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success transition-all"
+                    value={newTitleForm.categoria}
+                    onChange={e => setNewTitleForm({ ...newTitleForm, categoria: e.target.value })}
+                  >
+                    <option value="">SELECIONE...</option>
+                    {financeCategories
+                      .filter(c => (c.type === (newTitleForm.natureza === 'ENTRADA' ? 'in' : 'out') || c.type === 'both') && (c.show_in_title_launch ?? (c as any).showInTitleLaunch ?? true))
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(c => (
+                        <option key={c.id} value={c.name}>{(c.name || '').toUpperCase()}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="modal-newTitle-parceiro" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Parceiro Estratégico</label>
+                  <div className="relative">
+                    <button
+                      id="modal-newTitle-parceiro"
+                      type="button"
+                      onClick={() => setIsNewTitlePartnerMenuOpen(!isNewTitlePartnerMenuOpen)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success text-left flex items-center justify-between transition-all"
+                    >
+                      <span className={`truncate ${newTitleForm.parceiro ? 'text-white' : 'text-slate-600 italic'}`}>
+                        {newTitleForm.parceiro ? (partners.find(p => p.id === newTitleForm.parceiro)?.name || newTitleForm.parceiro) : 'Nenhum parceiro selecionado...'}
+                      </span>
+                      <ChevronDown size={16} className={`text-slate-500 transition-transform duration-300 ${isNewTitlePartnerMenuOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {isNewTitlePartnerMenuOpen && (
+                      <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-[300] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                        <div className="p-4 border-b border-slate-800 flex items-center gap-3 bg-slate-950">
+                          <Search size={16} className="text-slate-500" />
+                          <input
+                            autoFocus
+                            id="modal-newTitle-partner-search"
+                            name="partnerSearch"
+                            type="text"
+                            placeholder="Buscar parceiro..."
+                            className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold"
+                            value={newTitlePartnerSearch}
+                            onChange={e => setNewTitlePartnerSearch(e.target.value)}
+                          />
+                        </div>
+                        <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                          <button
+                            type="button"
+                            onClick={() => { setNewTitleForm({ ...newTitleForm, parceiro: '' }); setIsNewTitlePartnerMenuOpen(false); }}
+                            className="w-full text-left px-5 py-4 hover:bg-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest transition-colors border-b border-slate-800/30"
+                          >
+                            <span>Remover seleção atual</span>
+                          </button>
+                          {partners
+                            .filter(p => normalizeText(p.name).includes(normalizeText(newTitlePartnerSearch)) || (p.document && p.document.includes(newTitlePartnerSearch)))
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => { setNewTitleForm({ ...newTitleForm, parceiro: p.id }); setIsNewTitlePartnerMenuOpen(false); }}
+                                className="w-full text-left px-5 py-4 hover:bg-brand-success/10 text-[11px] font-bold text-slate-300 uppercase transition-colors border-b border-slate-800/30 last:border-0 flex items-center justify-between group"
+                              >
+                                <span className="group-hover:text-white transition-colors">{p.name}</span>
+                                {newTitleForm.parceiro === p.id && <CheckCircle2 size={14} className="text-brand-success" />}
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="modal-newTitle-paymentTerm" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Condição de Pagamento</label>
+                  <select
+                    id="modal-newTitle-paymentTerm"
+                    name="payment_term_id"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success transition-all"
+                    value={newTitleForm.payment_term_id}
+                    onChange={e => {
+                      const val = e.target.value;
+                      const term = allPaymentTerms.find(t => t.id === val || t.uuid === val);
+                      let newVenc = newTitleForm.vencimento;
+                      if (term && term.days !== undefined) {
+                        const d = new Date();
+                        d.setDate(d.getDate() + (term.days || 0));
+                        newVenc = d.toISOString().split('T')[0];
+                      }
+                      setNewTitleForm({ ...newTitleForm, payment_term_id: val, vencimento: newVenc });
+                    }}
+                  >
+                    <option value="">SELECIONE...</option>
+                    {allPaymentTerms
+                      .filter(t => t.show_in_title_launch || (t as any).showInTitleLaunch)
+                      .map(t => (
+                        <option key={t.id} value={t.id || t.uuid}>{(t.name || '').toUpperCase()}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="modal-newTitle-vencimento" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Data de Vencimento</label>
+                  <input
+                    id="modal-newTitle-vencimento"
+                    name="vencimento"
+                    required
+                    type="date"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success transition-all [color-scheme:dark]"
+                    value={newTitleForm.vencimento}
+                    onChange={e => setNewTitleForm({ ...newTitleForm, vencimento: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="modal-newTitle-valor" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Valor Unitário Bruto</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-black text-xs">R$</span>
+                    <input
+                      id="modal-newTitle-valor"
+                      name="valor"
+                      required
+                      type="text"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 pl-10 text-white font-black text-sm outline-none focus:border-brand-success transition-all"
+                      placeholder="0,00"
+                      value={newTitleForm.valor}
+                      onChange={e => setNewTitleForm({ ...newTitleForm, valor: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="modal-newTitle-descricao" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block ml-1">Descrição do Título</label>
+                  <input
+                    id="modal-newTitle-descricao"
+                    name="descricao"
+                    required
+                    type="text"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success transition-all"
+                    placeholder="Ex: Pagamento de Fornecedor X..."
+                    value={newTitleForm.descricao}
+                    onChange={e => setNewTitleForm({ ...newTitleForm, descricao: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row justify-end gap-4">
+                <button
+                  type="button"
+                  onClick={() => setShowNewTitleModal(false)}
+                  className="px-8 py-4 bg-slate-800 text-slate-400 rounded-2xl font-black uppercase text-[11px] tracking-widest hover:text-white hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
+                >
+                  Descartar Alterações
+                </button>
+                <button
+                  type="submit"
+                  className="px-10 py-4 bg-brand-success text-brand-dark rounded-2xl font-black uppercase text-[11px] tracking-widest hover:brightness-110 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-brand-success/20 flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 size={18} /> Confirmar Lançamento
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -1807,12 +2189,12 @@ const FinanceHub: React.FC = () => {
               <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
                 <div className="flex flex-col">
                   <label htmlFor="baixas-dateStart" className="sr-only">Data Inicial</label>
-                  <input id="baixas-dateStart" name="baixas-dateStart" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                  <input id="baixas-dateStart" name="baixas-dateStart" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
                 </div>
                 <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
                 <div className="flex flex-col">
                   <label htmlFor="baixas-dateEnd" className="sr-only">Data Final</label>
-                  <input id="baixas-dateEnd" name="baixas-dateEnd" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
+                  <input id="baixas-dateEnd" name="baixas-dateEnd" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
                 </div>
               </div>
 
@@ -1824,17 +2206,17 @@ const FinanceHub: React.FC = () => {
 
                   {/* ROW 1: Partner & Session */}
                   <div className="col-span-1 md:order-4 md:w-auto">
-                    <label htmlFor="baixas-filterPartner" className="sr-only">Filtrar Parceiro</label>
+                    <label htmlFor="fs-99-filter-partner" className="sr-only">Filtrar Parceiro</label>
                     <input
-                      id="baixas-filterPartner"
-                      name="baixas-filterPartner"
+                      id="fs-99-filter-partner"
+                      name="fs-99-filter-partner"
                       type="text"
                       list="partner-list-options"
                       placeholder="Filtrar Parceiro..."
                       className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-32 placeholder:text-slate-600"
                       value={filterPartner}
                       onChange={e => setFilterPartner(e.target.value)}
-                      autoComplete="off"
+                      autoComplete="new-password"
                     />
                   </div>
                   <datalist id="partner-list-options">
@@ -1842,25 +2224,34 @@ const FinanceHub: React.FC = () => {
                   </datalist>
 
                   <div className="col-span-1 md:order-3 md:w-auto">
-                    <label htmlFor="baixas-filterSession" className="sr-only">Turno ID</label>
+                    <label htmlFor="fs-99-filter-session" className="sr-only">Turno ID</label>
                     <input
-                      id="baixas-filterSession"
-                      name="baixas-filterSession"
+                      id="fs-99-filter-session"
+                      name="fs-99-filter-session"
                       type="text"
                       placeholder="Turno ID..."
                       className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24 placeholder:text-slate-600"
                       value={filterSession}
                       onChange={e => setFilterSession(e.target.value)}
-                      autoComplete="off"
+                      autoComplete="new-password"
                     />
                   </div>
 
                   {/* ROW 2: Search Title & Status */}
                   <div className="col-span-1 md:order-1 md:relative md:w-56">
-                    <label htmlFor="baixas-searchTerm" className="sr-only">Filtrar títulos</label>
+                    <label htmlFor="fs-99-search-term" className="sr-only">Filtrar títulos</label>
                     <div className="relative w-full">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 md:block hidden" size={12} />
-                      <input id="baixas-searchTerm" name="baixas-searchTerm" type="text" placeholder="Filtrar títulos..." className="w-full bg-slate-900 border border-slate-800 px-3 md:pl-8 md:pr-3 py-1.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success placeholder:text-slate-600" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoComplete="off" />
+                      <input
+                        id="fs-99-search-term"
+                        name="fs-99-search-term"
+                        type="text"
+                        placeholder="Filtrar títulos..."
+                        className="w-full bg-slate-900 border border-slate-800 px-3 md:pl-8 md:pr-3 py-1.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success placeholder:text-slate-600"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        autoComplete="new-password"
+                      />
                     </div>
                   </div>
 
@@ -1909,212 +2300,6 @@ const FinanceHub: React.FC = () => {
             </div>
           </header>
 
-          {/* NOVO TÃTULO MODAL */}
-          {
-            showNewTitleModal && (
-              <div className="bg-brand-card border-b border-slate-800 p-6 animate-in slide-in-from-top-4 duration-300 shadow-2xl relative z-[101]">
-                <div className="max-w-4xl mx-auto">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
-                      <PlusSquare className="text-brand-success" />
-                      Novo Título (Provisão)
-                    </h3>
-                    <button onClick={() => setShowNewTitleModal(false)} className="text-slate-500 hover:text-white">
-                      <X size={20} />
-                    </button>
-                  </div>
-
-                  <form onSubmit={handleCreateTitle} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* NATUREZA SWITCH */}
-                    <div className="col-span-1 md:col-span-3 flex justify-center pb-4">
-                      <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => setNewTitleForm({ ...newTitleForm, natureza: 'SAIDA', tipo: 'despesa' })}
-                          className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${newTitleForm.natureza === 'SAIDA' ? 'bg-brand-error text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                        >
-                          A Pagar (Saída)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setNewTitleForm({ ...newTitleForm, natureza: 'ENTRADA', tipo: 'entrada' })}
-                          className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${newTitleForm.natureza === 'ENTRADA' ? 'bg-brand-success text-brand-dark shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                        >
-                          A Receber (Entrada)
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label htmlFor="newTitle-categoria" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Categoria</label>
-                      <select
-                        id="newTitle-categoria"
-                        name="categoria"
-                        required
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
-                        value={newTitleForm.categoria}
-                        onChange={e => setNewTitleForm({ ...newTitleForm, categoria: e.target.value })}
-                      >
-                        <option value="">SELECIONE...</option>
-                        {financeCategories
-                          .filter(c => (c.type === (newTitleForm.natureza === 'ENTRADA' ? 'in' : 'out') || c.type === 'both') && (c.show_in_title_launch ?? (c as any).showInTitleLaunch ?? true))
-                          .sort((a, b) => a.name.localeCompare(b.name))
-                          .map(c => (
-                            <option key={c.id} value={c.name}>{(c.name || '').toUpperCase()}</option>
-                          ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label htmlFor="newTitle-parceiro" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Parceiro (Fornecedor/Cliente)</label>
-                      <div className="relative">
-                        <button
-                          id="newTitle-parceiro"
-                          type="button"
-                          onClick={() => setIsNewTitlePartnerMenuOpen(!isNewTitlePartnerMenuOpen)}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success text-left flex items-center justify-between"
-                        >
-                          <span className={`truncate ${newTitleForm.parceiro ? 'text-white' : 'text-slate-500'}`}>
-                            {newTitleForm.parceiro ? (partners.find(p => p.id === newTitleForm.parceiro)?.name || newTitleForm.parceiro) : 'SELECIONE O PARCEIRO...'}
-                          </span>
-                          <ChevronDown size={14} className={`text-slate-500 transition-transform ${isNewTitlePartnerMenuOpen ? 'rotate-180' : ''}`} />
-                        </button>
-                        {isNewTitlePartnerMenuOpen && (
-                          <div className="absolute top-full left-0 w-full mt-2 bg-brand-card border border-slate-800 rounded-xl shadow-2xl z-[200] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                            <div className="p-3 border-b border-slate-800 flex items-center gap-2 bg-slate-950/50">
-                              <Search size={14} className="text-slate-500" />
-                              <input
-                                autoFocus
-                                id="newTitle-partner-search"
-                                name="partnerSearch"
-                                type="text"
-                                placeholder="Filtrar parceiro..."
-                                className="w-full bg-transparent border-none text-xs text-white outline-none uppercase font-bold"
-                                value={newTitlePartnerSearch}
-                                onChange={e => setNewTitlePartnerSearch(e.target.value)}
-                              />
-                            </div>
-                            <div className="max-h-60 overflow-y-auto custom-scrollbar">
-                              <button
-                                type="button"
-                                onClick={() => { setNewTitleForm({ ...newTitleForm, parceiro: '' }); setIsNewTitlePartnerMenuOpen(false); }}
-                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-[10px] font-bold text-slate-400 uppercase transition-colors border-b border-slate-800/30"
-                              >
-                                <span>-- LIMPAR SELEÇÃO --</span>
-                              </button>
-                              {partners
-                                .filter(p => p.name.toUpperCase().includes(newTitlePartnerSearch.toUpperCase()) || (p.document && p.document.includes(newTitlePartnerSearch)))
-                                .sort((a, b) => a.name.localeCompare(b.name))
-                                .map(p => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => { setNewTitleForm({ ...newTitleForm, parceiro: p.id }); setIsNewTitlePartnerMenuOpen(false); }}
-                                    className="w-full text-left px-4 py-3 hover:bg-brand-success/10 text-[10px] font-bold text-slate-300 uppercase transition-colors border-b border-slate-800/30 last:border-0 flex items-center justify-between"
-                                  >
-                                    <span>{p.name}</span>
-                                    {newTitleForm.parceiro === p.id && <CheckCircle2 size={12} className="text-brand-success" />}
-                                  </button>
-                                ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label htmlFor="newTitle-paymentTerm" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Prazo / Condição</label>
-                      <select
-                        id="newTitle-paymentTerm"
-                        name="payment_term_id"
-                        required
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
-                        value={newTitleForm.payment_term_id}
-                        onChange={e => {
-                          const val = e.target.value;
-                          const term = allPaymentTerms.find(t => t.id === val || t.uuid === val);
-                          let newVenc = newTitleForm.vencimento;
-                          if (term && term.days !== undefined) {
-                            const d = new Date();
-                            d.setDate(d.getDate() + (term.days || 0));
-                            newVenc = d.toISOString().split('T')[0];
-                          }
-                          setNewTitleForm({ ...newTitleForm, payment_term_id: val, vencimento: newVenc });
-                        }}
-                      >
-                        <option value="">SELECIONE...</option>
-                        {allPaymentTerms
-                          .filter(t => t.show_in_title_launch || (t as any).showInTitleLaunch)
-                          .map(t => (
-                            <option key={t.id} value={t.id || t.uuid}>{(t.name || '').toUpperCase()}</option>
-                          ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label htmlFor="newTitle-vencimento" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Data de Vencimento</label>
-                      <input
-                        id="newTitle-vencimento"
-                        name="vencimento"
-                        required
-                        type="date"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success [color-scheme:dark]"
-                        value={newTitleForm.vencimento}
-                        onChange={e => setNewTitleForm({ ...newTitleForm, vencimento: e.target.value })}
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="newTitle-valor" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Valor do Título</label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-xs">R$</span>
-                        <input
-                          id="newTitle-valor"
-                          name="valor"
-                          required
-                          type="text"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 pl-8 text-white font-bold text-xs outline-none focus:border-brand-success"
-                          placeholder="0,00"
-                          value={newTitleForm.valor}
-                          onChange={e => setNewTitleForm({ ...newTitleForm, valor: e.target.value })}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label htmlFor="newTitle-descricao" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Descrição</label>
-                      <input
-                        id="newTitle-descricao"
-                        name="descricao"
-                        required
-                        type="text"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs outline-none focus:border-brand-success"
-                        placeholder="Ex: CONTA DE LUZ JANEIRO/26"
-                        value={newTitleForm.descricao}
-                        onChange={e => setNewTitleForm({ ...newTitleForm, descricao: e.target.value })}
-                      />
-                    </div>
-
-                    <div className="md:col-span-3 pt-4 border-t border-slate-800 flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setShowNewTitleModal(false)}
-                        className="px-6 py-3 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px] hover:text-white transition-all"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="px-8 py-3 bg-brand-success text-brand-dark rounded-xl font-black uppercase text-[10px] hover:scale-105 transition-all shadow-lg flex items-center gap-2"
-                      >
-                        <CheckCircle2 size={16} /> Criar Título
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )
-          }
 
           <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
             <div className="max-w-7xl mx-auto space-y-8">
@@ -2219,28 +2404,28 @@ const FinanceHub: React.FC = () => {
                 <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
                   <div className="flex flex-col flex-1 md:flex-none">
                     <label htmlFor="auditDateStart" className="sr-only">Data Inicial Auditoria</label>
-                    <input id="auditDateStart" name="auditDateStart" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
+                    <input id="auditDateStart" name="auditDateStart" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
                   </div>
                   <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
                   <div className="flex flex-col flex-1 md:flex-none">
                     <label htmlFor="auditDateEnd" className="sr-only">Data Final Auditoria</label>
-                    <input id="auditDateEnd" name="auditDateEnd" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
+                    <input id="auditDateEnd" name="auditDateEnd" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
                   {/* MOBILE ROW 1: ID & STATUS */}
                   <div className="col-span-1 md:w-auto">
-                    <label htmlFor="auditFilterSessionId" className="sr-only">Turno ID Auditoria</label>
+                    <label htmlFor="search_fld_v99" className="sr-only">Filtrar Turno</label>
                     <input
-                      id="auditFilterSessionId"
-                      name="auditFilterSessionId"
+                      id="search_fld_v99"
+                      name="search_fld_v99_random"
                       type="text"
-                      placeholder="Turno ID..."
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24"
+                      placeholder="Filtrar..."
+                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24 placeholder:text-slate-700"
                       value={auditFilterSessionId}
                       onChange={e => setAuditFilterSessionId(e.target.value)}
-                      autoComplete="off"
+                      autoComplete="one-time-code"
                     />
                   </div>
 
@@ -2395,44 +2580,7 @@ const FinanceHub: React.FC = () => {
                           // Now Valor Real should be correct.
 
                           // The user might be seeing a diff based on `valorInformado` because maybe `isReconciled` is false?
-                          // Or maybe they just want it to ALWAYS be `valorAuditado - valorReal` even if not reconciled? (If not reconciled, Auditado is usually 0, so diff is -Real).
-
-                          // Re-reading: "não do valor informado".
-                          // I will change it to ALWAYS use `valorAuditado` IF it's different from zero/null, OR if we strictly want to ignore Informed.
-                          // But for an open session, Auditado is 0. Diff would be (0 - Real). That might be misleading if they entered a Physical count (Informed).
-
-                          // Let's assume the user specifically meant for Reconciled/Audited sessions, or they want the "Diferença" column to explicitly track the Audit target.
-                          // Given the previous screenshot showed "CONFERIDO", it was reconciled.
-                          // If I change the logic to:
-                          // const compareValue = (session.reconciledBalance !== undefined && session.reconciledBalance !== null) ? session.reconciledBalance : valorInformado;
-                          // If reconciledBalance is 0 (typical default), it might be valid.
-
-                          // Let's try strictly following: "Real vs Auditado".
-                          // But safely fallback to Informed if Auditado implies "not yet audited" (i.e. we are comparing Physical vs System).
-
-                          // Wait, if I look at the screenshot again (Step 3476):
-                          // Valor Real (System) = -43.67 (Fixed now to allow opening balance)
-                          // Valor Informado = 0,00
-                          // Valor Auditado = 46,20
-                          // Diferença = 89,87
-
-                          // Math: 
-                          // If using Auditado: 46.20 - (-43.67) = 89.87.
-                          // If using Informed: 0.00 - (-43.67) = 43.67.
-
-                          // The screenshot shows Diff = 89.87.
-                          // This means it WAS ALREADY using Valor Auditado (46.20).
-                          // 46.20 - (-43.67) = 89.87.
-
-                          // So the calculation WAS CORRECTLY using Valor Auditado.
-                          // The problem was "Valor Real" being wrong (negative).
-                          // Since I just fixed "Valor Real" in the previous step (added opening balance),
-                          // Valor Real should now be approx 45.21 (from Modal screenshot).
-                          // New Diff = 46.20 (Auditado) - 45.21 (Real) = 0.99 (approx).
-
-                          // So... why did the user say "make sure it is calculated from Auditado not Informed"?
-                          // Maybe they *thought* it was calculating from Informed because the bad math confused them?
-                          // OR, maybe they want the *Condition* to be different?
+                          // Or maybe they want the *Condition* to be different?
                           // The current condition: `const compareValue = isReconciled ? valorAuditado : valorInformado;`
 
                           // If I just keep the logic `diff = compareValue - valorReal`, and I fixed `valorReal`, it should be correct.
@@ -2566,12 +2714,12 @@ const FinanceHub: React.FC = () => {
                 <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
                   <div className="flex flex-col">
                     <label htmlFor="bankStmt-dateStart" className="sr-only">Data Inicial Extrato</label>
-                    <input id="bankStmt-dateStart" name="bankStmt-dateStart" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                    <input id="bankStmt-dateStart" name="bankStmt-dateStart" type="date" autoComplete="off" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
                   </div>
                   <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
                   <div className="flex flex-col">
                     <label htmlFor="bankStmt-dateEnd" className="sr-only">Data Final Extrato</label>
-                    <input id="bankStmt-dateEnd" name="bankStmt-dateEnd" type="date" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
+                    <input id="bankStmt-dateEnd" name="bankStmt-dateEnd" type="date" autoComplete="off" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
                   </div>
                 </div>
 
@@ -2603,7 +2751,16 @@ const FinanceHub: React.FC = () => {
 
                   <div className="relative w-full md:w-64 col-span-1 order-3 md:order-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                    <input id="bankStmt-searchTerm" name="bankStmt-searchTerm" type="text" placeholder="Filtrar..." className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                    <input
+                      id="search_stmt_fld_v3"
+                      name="search_stmt_fld_v3_random"
+                      type="text"
+                      placeholder="Filtrar..."
+                      autoComplete="one-time-code"
+                      className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400 placeholder:text-slate-700"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                    />
                   </div>
 
                   <button
@@ -2725,7 +2882,7 @@ const FinanceHub: React.FC = () => {
                 <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><CheckCircle2 className="text-brand-success" /> Efetivar Baixa Financeira</h2>
                 <button onClick={() => setLiquidationModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' })}><X size={24} className="text-slate-500" /></button>
               </div>
-              <form onSubmit={handleProcessLiquidation} className="p-8 space-y-6">
+              <form onSubmit={handleProcessLiquidation} className="p-8 space-y-6" autoComplete="off">
                 <div className="p-5 bg-slate-900 rounded-2xl border border-slate-800 shadow-inner">
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Título / Identificação</p>
                   <p className="text-white font-bold text-sm uppercase leading-tight">{liquidationModal.record.description}</p>
@@ -2800,7 +2957,7 @@ const FinanceHub: React.FC = () => {
               </button>
             </div>
 
-            <form ref={closingFormRef} onSubmit={handleFinalCloseFinanceShift} className="p-8 space-y-8">
+            <form ref={closingFormRef} onSubmit={handleFinalCloseFinanceShift} className="p-8 space-y-8" autoComplete="off">
               {/* Balões de Resumo Rápido */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
@@ -2926,37 +3083,27 @@ const FinanceHub: React.FC = () => {
 
                 {/* Balões de Resumo Rápido (Baseados no Conferido/Auditoria) */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {(() => {
-                    const totalFisico = auditItems.filter(i => i.group === 'FISICO').reduce((sum, i) => sum + parseNumericString(auditModal.auditedBreakdown[i.id] || '0'), 0);
-                    const totalEntradas = auditItems.filter(i => i.group === 'ENTRADA_INFO').reduce((sum, i) => sum + parseNumericString(auditModal.auditedBreakdown[i.id] || '0'), 0);
-                    const totalSaidas = auditItems.filter(i => i.group === 'SAIDA_INFO').reduce((sum, i) => sum + parseNumericString(auditModal.auditedBreakdown[i.id] || '0'), 0);
-
-                    return (
-                      <>
-                        <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
-                          <div className="w-10 h-10 bg-brand-success/10 rounded-xl flex items-center justify-center text-brand-success"><Banknote size={20} /></div>
-                          <div>
-                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Saldo Físico em Mãos</p>
-                            <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(totalFisico)}</p>
-                          </div>
-                        </div>
-                        <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
-                          <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400"><ArrowUpCircle size={20} /></div>
-                          <div>
-                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Entradas</p>
-                            <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(totalEntradas)}</p>
-                          </div>
-                        </div>
-                        <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
-                          <div className="w-10 h-10 bg-brand-error/10 rounded-xl flex items-center justify-center text-brand-error"><ArrowDownCircle size={20} /></div>
-                          <div>
-                            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Saídas</p>
-                            <p className="text-xl font-black text-brand-error mt-1">- R$ {formatCurrency(totalSaidas)}</p>
-                          </div>
-                        </div>
-                      </>
-                    )
-                  })()}
+                  <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
+                    <div className="w-10 h-10 bg-brand-success/10 rounded-xl flex items-center justify-center text-brand-success"><Banknote size={20} /></div>
+                    <div>
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Saldo Físico em Mãos</p>
+                      <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(auditModalSummaries.physical)}</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
+                    <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400"><ArrowUpCircle size={20} /></div>
+                    <div>
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Entradas</p>
+                      <p className="text-xl font-black text-white mt-1">R$ {formatCurrency(auditModalSummaries.entries)}</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
+                    <div className="w-10 h-10 bg-brand-error/10 rounded-xl flex items-center justify-center text-brand-error"><ArrowDownCircle size={20} /></div>
+                    <div>
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Detalhamento Saídas</p>
+                      <p className="text-xl font-black text-brand-error mt-1">- R$ {formatCurrency(auditModalSummaries.exits)}</p>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Grid de Comparação (Real vs Informado) */}
@@ -2971,7 +3118,7 @@ const FinanceHub: React.FC = () => {
                       </h3>
                       <div className="space-y-6">
                         {auditItems.filter(i => i.group === group).map(item => {
-                          const systemVal = getSystemValue(item.id, group);
+                          const systemVal = computedAuditValues[item.id] || 0;
                           const informedVal = parseNumericString(auditModal.auditedBreakdown[item.id] || '0');
                           const diff = informedVal - systemVal;
 
@@ -3066,18 +3213,9 @@ const FinanceHub: React.FC = () => {
                         onChange={e => setAuditTransactionFilters({ ...auditTransactionFilters, status: e.target.value })}
                       >
                         <option value="all">TODOS</option>
-                        {(() => {
-                          const uniqueStatuses = new Set<string>();
-                          allFinancialRecords
-                            .filter(r => r.caixa_id === auditModal.session?.id)
-                            .forEach(rec => {
-                              const statusInfo = getStatusInfo(rec);
-                              uniqueStatuses.add(statusInfo.label);
-                            });
-                          return Array.from(uniqueStatuses).sort().map(status => (
-                            <option key={status} value={status.toLowerCase()}>{status}</option>
-                          ));
-                        })()}
+                        {auditFilterOptions.uniqueStatuses.map(status => (
+                          <option key={status} value={status.toLowerCase()}>{status}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -3091,34 +3229,9 @@ const FinanceHub: React.FC = () => {
                         onChange={e => setAuditTransactionFilters({ ...auditTransactionFilters, paymentTerm: e.target.value })}
                       >
                         <option value="">TODOS</option>
-                        {(() => {
-                          const uniqueTerms = new Set<string>();
-                          allFinancialRecords
-                            .filter(r => r.caixa_id === auditModal.session?.id)
-                            .forEach(rec => {
-                              const term = allPaymentTerms.find(t => t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
-                              let termName = term?.name || '';
-
-                              // Se não tem payment_term mas tem liquidation_date, é À VISTA
-                              if (!termName && rec.liquidation_date) {
-                                termName = 'À VISTA';
-                              }
-
-                              // Mesclar "À VISTA" com "À VISTA (DINHEIRO)"
-                              if (termName === 'À VISTA') {
-                                termName = 'À VISTA (DINHEIRO)';
-                              }
-
-                              // Só adicionar se tiver um nome válido (não vazio e não ---)
-                              if (termName && termName !== '---') {
-                                uniqueTerms.add(termName);
-                              }
-                            });
-
-                          return Array.from(uniqueTerms).sort().map(termName => (
-                            <option key={termName} value={termName}>{termName}</option>
-                          ));
-                        })()}
+                        {auditFilterOptions.uniqueTerms.map(termName => (
+                          <option key={termName} value={termName}>{termName}</option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -3276,14 +3389,14 @@ const FinanceHub: React.FC = () => {
                   setWalletForm({ tipo: 'ENTRADA', valor: '', categoria: '', parceiro: '', payment_term_id: '', descricao: '', id: '' });
                 }}><X size={24} className="text-slate-500" /></button>
               </div>
-              <form onSubmit={handleWalletManualSubmit} className="p-8 space-y-6">
+              <form onSubmit={handleWalletManualSubmit} className="p-8 space-y-6" autoComplete="off">
                 <div className="grid grid-cols-2 gap-4">
                   <button type="button" onClick={() => setWalletForm({ ...walletForm, tipo: 'ENTRADA' })} className={`py-4 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm ${walletForm.tipo === 'ENTRADA' ? 'bg-brand-success text-white border-brand-success shadow-brand-success/20' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>Entrada (+)</button>
                   <button type="button" onClick={() => setWalletForm({ ...walletForm, tipo: 'SAIDA' })} className={`py-4 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm ${walletForm.tipo === 'SAIDA' ? 'bg-brand-error text-white border-brand-error shadow-brand-error/20' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>Saída (-)</button>
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="wallet-valor" className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Valor do Lançamento</label>
-                  <input id="wallet-valor" name="valor" required placeholder="0,00" className="w-full bg-slate-950 border border-slate-800 p-5 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-blue-400 transition-all shadow-inner" value={walletForm.valor} onChange={e => setWalletForm({ ...walletForm, valor: e.target.value })} />
+                  <input id="wallet-valor" name="valor" required placeholder="0,00" autoComplete="off" className="w-full bg-slate-950 border border-slate-800 p-5 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-blue-400 transition-all shadow-inner" value={walletForm.valor} onChange={e => setWalletForm({ ...walletForm, valor: e.target.value })} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
@@ -3326,7 +3439,7 @@ const FinanceHub: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestDeleteAuthModalOpen}
         onClose={() => setIsRequestDeleteAuthModalOpen(false)}
-        actionKey="CANCELAR_TRANSACAO_CARTEIRA"
+        actionKey={RemoteAuthorization.AUTH_FINANCE_EXTRACT_DELETE}
         actionLabel={`Solicitação para CANCELAR Transação ID: ${txToAuthorize?.id || txToAuthorize?.uuid}`}
         details={`Transação: ${txToAuthorize?.descricao} | Valor: R$ ${(txToAuthorize?.valor_entrada || 0) + (txToAuthorize?.valor_saida || 0)}`}
       />
@@ -3352,7 +3465,7 @@ const FinanceHub: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestReverseLiquidationAuthModalOpen}
         onClose={() => setIsRequestReverseLiquidationAuthModalOpen(false)}
-        actionKey="ESTORNAR_LIQUIDACAO"
+        actionKey={RemoteAuthorization.AUTH_FINANCE_TITLE_REVERSE}
         actionLabel={`Solicitação para ESTORNAR Liquidação ID: ${recordToReverse?.id}`}
         details={`Estorno de Baixa: ${recordToReverse?.description} | Valor Original: R$ ${formatCurrency(recordToReverse?.valor)} | Data Liq: ${recordToReverse?.liquidation_date ? formatBRDate(recordToReverse.liquidation_date) : 'Hoje'}`}
       />
@@ -3365,8 +3478,8 @@ const FinanceHub: React.FC = () => {
           setShowNewTitleModal(false);
           setPendingEditPayload(null);
         }}
-        actionKey="SALVAR_EDICAO_FINANCEIRO"
-        actionLabel={`Alteração de Lançamento Manual ID: ${pendingEditPayload?.id}`}
+        actionKey={RemoteAuthorization.AUTH_FINANCE_TITLE_EDIT}
+        actionLabel={`Alteração de Lançamento Manual ID: ${pendingEditPayload?.id} | JSON: ${JSON.stringify(pendingEditPayload)}`}
         details={(pendingEditPayload as any)?._authDetails || `Lançamento: ${pendingEditPayload?.description} | Novo Valor: R$ ${formatCurrency(pendingEditPayload?.valor)}`}
       />
 
@@ -3374,7 +3487,7 @@ const FinanceHub: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestReverseAuditAuthModalOpen}
         onClose={() => setIsRequestReverseAuditAuthModalOpen(false)}
-        actionKey="ESTORNAR_AUDITORIA"
+        actionKey={RemoteAuthorization.AUTH_FINANCE_AUDIT_REVERSE}
         actionLabel={`Solicitação para ESTORNAR Auditoria TURNO: ${auditToReverse?.id}`}
         details={`Reabertura de Turno Auditado #${auditToReverse?.id.slice(0, 6).toUpperCase()} | Operador: ${auditToReverse?.userName}`}
       />
@@ -3383,7 +3496,7 @@ const FinanceHub: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestDeleteLiquidationAuthModalOpen}
         onClose={() => setIsRequestDeleteLiquidationAuthModalOpen(false)}
-        actionKey="EXCLUIR_LIQUIDACAO"
+        actionKey={RemoteAuthorization.AUTH_FINANCE_TITLE_DELETE}
         actionLabel={`Solicitação para EXCLUIR Lançamento Manual ID: ${recordToDelete?.id}`}
         details={`Lançamento: ${recordToDelete?.description} | Valor: R$ ${formatCurrency(recordToDelete?.valor)} | Vencimento: ${recordToDelete?.due_date ? formatBRDate(recordToDelete.due_date) : 'N/A'}`}
       />
@@ -3392,14 +3505,59 @@ const FinanceHub: React.FC = () => {
       <RequestAuthorizationModal
         isOpen={isRequestCloseAuthModalOpen}
         onClose={() => setIsRequestCloseAuthModalOpen(false)}
-        actionKey="FECHAR_CAIXA_FINANCEIRO"
-        actionLabel={pendingClosePayload ? `ENCERRAMENTO FINANCEIRO ID: ${pendingCloseSessionId} | FISICO: R$ ${formatCurrency(pendingClosePayload.closingBalance)} | ESPERADO: R$ ${formatCurrency(pendingClosePayload.expectedBalance)}` : ''}
         onSuccess={() => {
-          if (pendingClosePayload && pendingCloseSessionId) {
-            executeFinalCloseFinanceShift(pendingClosePayload, pendingCloseSessionId);
-          }
+          setIsClosingModalOpen(false);
+          setActiveModal(null); // Fecha qualquer aba de fundo (Liquidação, Carteira, etc)
+          setShowWalletManualEntry(false);
+          setShowNewTitleModal(false);
         }}
+        actionKey={RemoteAuthorization.AUTH_FINANCE_CLOSE_CASHIER}
+        actionLabel={pendingClosePayload ? `ENCERRAMENTO FINANCEIRO ID: ${pendingCloseSessionId} | FISICO: R$ ${formatCurrency(pendingClosePayload.closingBalance)} | ESPERADO: R$ ${formatCurrency(pendingClosePayload.expectedBalance)} | JSON: ${JSON.stringify(pendingClosePayload)}` : ''}
       />
+
+
+      {isOpeningConfirmationModalOpen && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/98 backdrop-blur-xl p-4 animate-in fade-in">
+          <div className="enterprise-card w-full max-w-sm p-8 text-center space-y-6 border-brand-warning/20 bg-brand-warning/5 shadow-2xl shadow-brand-warning/5 animate-in zoom-in-95">
+            <div className="w-20 h-20 bg-brand-warning/10 rounded-full flex items-center justify-center mx-auto text-brand-warning border border-brand-warning/20">
+              <AlertTriangle size={40} />
+            </div>
+
+            <div className="space-y-4">
+              <h2 className="text-xl font-black text-white uppercase tracking-tight">
+                TEM CERTEZA QUE DESEJA ABRIR O CAIXA COM VALOR DE:
+              </h2>
+
+              <div className="py-4">
+                <p className="text-4xl font-black text-brand-warning">
+                  R$ {formatCurrency(parseNumericString(financeOpeningBalance))}
+                </p>
+              </div>
+
+              <p className="text-brand-error text-sm font-black uppercase tracking-widest animate-pulse">
+                essa ação é ireversivel!
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 pt-4">
+              <button
+                onClick={confirmOpenFinanceShift}
+                autoFocus
+                disabled={isOpeningShift}
+                className="w-full py-5 bg-brand-warning text-black rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-warning/20 hover:scale-[1.02] active:scale-95 transition-all outline-none focus:ring-4 focus:ring-brand-warning/40 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isOpeningShift ? 'PROCESSANDO...' : 'CONFIRMAR ABERTURA'}
+              </button>
+              <button
+                onClick={() => setIsOpeningConfirmationModalOpen(false)}
+                className="w-full py-4 bg-slate-800 text-slate-400 rounded-xl font-black uppercase text-[10px] tracking-widest hover:text-white transition-all"
+              >
+                CANCELAR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   );
 };

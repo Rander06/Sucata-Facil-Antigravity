@@ -292,10 +292,10 @@ const Users: React.FC = () => {
         <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in">
           <div className="enterprise-card w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl border-slate-700">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><Edit2 size={24} /> Editar Integrante</h2><button onClick={() => setUserModal({ show: false, data: null })} className="p-2 text-slate-500"><X size={32} /></button></div>
-            <form onSubmit={handleSaveUser} className="p-8 pb-24 space-y-6">
+            <form onSubmit={handleSaveUser} className="p-8 pb-24 space-y-6" autoComplete="new-password">
               <div className="space-y-3">
                 <label htmlFor="edit-user-name" className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome do Colaborador</label>
-                <input required id="edit-user-name" name="name" className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
+                <input required id="edit-user-name" name="name" autoComplete="new-password" className="w-full bg-slate-900 border-2 border-slate-800 p-4 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={editFormData.name} onChange={e => setEditFormData({ ...editFormData, name: e.target.value })} placeholder="Nome Completo" />
               </div>
 
               <div className="space-y-3">
@@ -511,7 +511,7 @@ const Users: React.FC = () => {
               } catch (err) {
                 alert('Erro ao gerar convite.');
               }
-            }} className="p-8 pb-24 space-y-6">
+            }} className="p-8 pb-24 space-y-6" autoComplete="new-password">
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">

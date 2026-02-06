@@ -59,7 +59,7 @@ export const authorizationService = {
     return db.queryTenant<AuthorizationRequest>(
       'authorization_requests' as any,
       companyId,
-      (req) => req.status === 'PENDING' || req.status === 'APPROVED'
+      (req) => req.status === 'PENDING' || req.status === 'APPROVED' || req.status === 'DENIED'
     );
   },
 

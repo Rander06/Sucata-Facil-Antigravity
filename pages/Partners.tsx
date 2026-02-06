@@ -95,7 +95,7 @@ const Partners: React.FC = () => {
       <div className="enterprise-card overflow-hidden border-slate-800 mx-1 shadow-2xl">
         <div className="p-6 border-b border-slate-800 flex items-center gap-4">
           <div className="flex items-center gap-4 bg-brand-dark p-3 px-5 rounded-2xl border-2 border-slate-800 max-w-md w-full group focus-within:border-brand-success transition-all">
-            <Search size={20} className="text-slate-500" /><input type="text" placeholder="Buscar parceiro..." className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            <Search size={20} className="text-slate-500" /><input type="text" placeholder="Buscar parceiro..." autoComplete="off" className="bg-transparent border-none focus:ring-0 text-sm flex-1 outline-none text-white font-medium" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -131,11 +131,11 @@ const Partners: React.FC = () => {
         <div className="absolute inset-0 z-[40] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4 animate-in fade-in overflow-y-auto">
           <div className="enterprise-card w-full max-xl overflow-hidden shadow-2xl border-slate-700 my-auto">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center"><h2 className="text-xl font-black text-white flex items-center gap-3 uppercase tracking-widest"><UserCircle size={24} /> {modalMode === 'create' ? 'Novo Parceiro' : modalMode === 'edit' ? 'Editar Dados' : 'Visualização'}</h2><button onClick={() => setShowModal(false)} className="p-2 text-slate-500 hover:text-white transition-all"><X size={32} /></button></div>
-            <form onSubmit={handleSave} className="p-8 space-y-6">
+            <form onSubmit={handleSave} className="p-8 space-y-6" autoComplete="off">
               {/* Nome / Razão Social */}
               <div className="space-y-3">
                 <label className="text-xs font-black text-slate-500 uppercase tracking-widest">Nome / Razão Social</label>
-                <input required disabled={modalMode === 'view'} autoComplete="organization" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="Nome completo" />
+                <input required disabled={modalMode === 'view'} autoComplete="off" className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="Nome completo" />
               </div>
 
               {/* Tipo de Parceiro */}
@@ -160,7 +160,7 @@ const Partners: React.FC = () => {
                   <input
                     required
                     disabled={modalMode === 'view'}
-                    autoComplete="off"
+                    autoComplete="new-password"
                     className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success"
                     value={formData.document}
                     onChange={e => setFormData({ ...formData, document: e.target.value })}
@@ -172,7 +172,7 @@ const Partners: React.FC = () => {
                   <input
                     required
                     disabled={modalMode === 'view'}
-                    autoComplete="tel"
+                    autoComplete="new-password"
                     className="w-full bg-slate-900 border-2 border-slate-800 p-5 rounded-2xl text-white font-bold outline-none focus:border-brand-success"
                     value={formData.phone}
                     onChange={e => setFormData({ ...formData, phone: e.target.value })}

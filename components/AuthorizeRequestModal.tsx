@@ -3,7 +3,7 @@ import { X, ShieldCheck, UserCheck, Lock, ChevronRight, AlertCircle, Key, Clock,
 import { useAppContext } from '../store/AppContext';
 import { authorizationService } from '../services/authorizationService';
 import { db } from '../services/dbService';
-import { AuthorizationRequest, PermissionModule, RemoteAuthorization } from '../types';
+import { AuthorizationRequest, PermissionModule, RemoteAuthorization, User, UserRole, OperationalProfile } from '../types';
 
 interface AuthorizeRequestModalProps {
   isOpen: boolean;
@@ -24,6 +24,32 @@ const AuthorizeRequestModal: React.FC<AuthorizeRequestModalProps> = ({ isOpen, o
     pendingRequests.filter(r => r.status === 'PENDING'),
     [pendingRequests]
   );
+
+  // Calcula lista de usuários que podem autorizar
+  const authorizedUsers = useMemo(() => {
+    const allUsers = db.get().users;
+
+    // Filtra usuários com poder de auditoria/autorização
+    const managers = allUsers.filter(u =>
+      u.role === UserRole.SUPER_ADMIN ||
+      (u.remote_authorizations && u.remote_authorizations.length > 0) ||
+      (u.profile?.includes(OperationalProfile.MASTER))
+    );
+
+    // Adiciona o Admin Master (Hardcoded) se não estiver na lista por e-mail
+    const hasHardcodedAdmin = managers.some(m => m.email === 'admin@sucatafacil.com');
+    const result = [...managers];
+
+    if (!hasHardcodedAdmin) {
+      result.unshift({
+        id: 'admin-master',
+        name: 'Administrador Master',
+        email: 'admin@sucatafacil.com'
+      } as User);
+    }
+
+    return result;
+  }, []);
 
   useEffect(() => {
     if (isOpen && currentUser && !email) setEmail(currentUser.email);
@@ -174,14 +200,24 @@ Valor envolvido: ${val}`;
                 <div className="space-y-3 pt-4 border-t border-slate-800/50">
                   <p className="text-[10px] font-black text-brand-success uppercase tracking-widest flex items-center gap-2"><Lock size={12} /> Chave de Segurança Master</p>
                   <div className="grid grid-cols-1 gap-3">
-                    <input
-                      type="email"
-                      placeholder="E-mail Gestor"
-                      className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs focus:border-brand-success outline-none transition-all"
+                    <select
+                      className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs focus:border-brand-success outline-none transition-all appearance-none cursor-pointer"
                       value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleApprove()}
-                    />
+                      onChange={e => {
+                        setEmail(e.target.value);
+                        // Ao selecionar um usuário, foca automaticamente na senha
+                        if (e.target.value) {
+                          setTimeout(() => passwordRef.current?.focus(), 100);
+                        }
+                      }}
+                    >
+                      <option value="">Selecione o Gestor</option>
+                      {authorizedUsers.map(user => (
+                        <option key={user.id} value={user.email}>
+                          {user.name.toUpperCase()} ({user.email})
+                        </option>
+                      ))}
+                    </select>
                     <input
                       ref={passwordRef}
                       type="password"
@@ -190,6 +226,7 @@ Valor envolvido: ${val}`;
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleApprove()}
+                      autoComplete="new-password"
                     />
                   </div>
                   {error && (

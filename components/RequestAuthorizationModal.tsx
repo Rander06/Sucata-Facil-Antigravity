@@ -12,7 +12,7 @@ interface RequestAuthorizationModalProps {
 }
 
 const RequestAuthorizationModal: React.FC<RequestAuthorizationModalProps> = ({ isOpen, onClose, onSuccess, actionKey, actionLabel }) => {
-  const { currentUser, pendingRequests } = useAppContext();
+  const { currentUser, pendingRequests, refreshRequests } = useAppContext();
 
   const existingRequest = useMemo(() =>
     pendingRequests.find(req => req.action_key === actionKey && req.action_label === actionLabel && req.status === 'PENDING'),
@@ -64,6 +64,7 @@ Valor envolvido: ${val}`;
     if (!currentUser || isDuplicate) return;
     try {
       await authorizationService.requestAuthorization(actionKey, actionLabel, currentUser);
+      refreshRequests(); // Atualização imediata local para feedback instantâneo
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
@@ -101,8 +102,8 @@ Valor envolvido: ${val}`;
               onClick={handleRequest}
               disabled={isDuplicate}
               className={`py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all ${isDuplicate
-                  ? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed'
-                  : 'bg-brand-warning text-black shadow-brand-warning/20 hover:scale-[1.02] active:scale-95'
+                ? 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed'
+                : 'bg-brand-warning text-black shadow-brand-warning/20 hover:scale-[1.02] active:scale-95'
                 }`}
             >
               {isDuplicate ? 'AGUARDANDO GESTOR' : 'SOLICITAR AGORA'}
