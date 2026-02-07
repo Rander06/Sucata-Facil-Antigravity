@@ -73,13 +73,37 @@ const Users: React.FC = () => {
   const [editFormData, setEditFormData] = useState<Partial<User>>({});
 
   const loadData = useCallback(() => {
-    const companyUsers = db.queryTenant<User>('users', companyId);
-    const combinedUsers = isCurrentSuperAdmin ? [...db.query<User>('users', u => u.role === UserRole.SUPER_ADMIN), ...companyUsers] : companyUsers;
-    const uniqueUsers = combinedUsers.filter((u, i, s) => i === s.findIndex((t) => t.id === u.id));
-    setUsers(uniqueUsers); setInvites(db.queryTenant<any>('invites', companyId));
+    const allUsers = db.query<User>('users');
+    const allInvites = db.query<any>('invites');
+
+    // Super Admin vê tudo. Outros vêem apenas sua empresa.
+    const companyUsers = isCurrentSuperAdmin
+      ? allUsers
+      : allUsers.filter(u => String(u.company_id || u.companyId || '').trim() === String(companyId).trim());
+
+    const companyInvites = isCurrentSuperAdmin
+      ? allInvites
+      : allInvites.filter(i => String(i.company_id || i.companyId || '').trim() === String(companyId).trim());
+
+    const uniqueUsers = companyUsers.filter((u, i, s) => i === s.findIndex((t) => t.id === u.id));
+    setUsers(uniqueUsers);
+    setInvites(companyInvites);
   }, [companyId, isCurrentSuperAdmin]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // DIAGNÓSTICO E AUTO-CORREÇÃO (Healer)
+  useEffect(() => {
+    if (isCurrentSuperAdmin && users.length > 0) {
+      const orphans = users.filter(u => !u.companyId && !u.company_id && u.role !== UserRole.SUPER_ADMIN);
+      if (orphans.length > 0) {
+        orphans.forEach(u => {
+          db.update('users', u.id, { company_id: companyId });
+        });
+        setTimeout(loadData, 500);
+      }
+    }
+  }, [users, invites, companyId, isCurrentSuperAdmin]);
 
   // MONITOR DE LIBERAÇÕES REMOTAS (ACT AS BACKEND JOBS)
   useEffect(() => {
@@ -164,9 +188,11 @@ const Users: React.FC = () => {
     <div className="max-w-7xl mx-auto space-y-8 pb-24 md:pb-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 px-1">
         <div><h1 className="text-3xl md:text-4xl font-black flex items-center gap-3 text-white uppercase tracking-tight"><ShieldCheckIcon className="text-brand-success" /> Equipe & Acessos</h1></div>
-        <button onClick={() => setShowInviteModal(true)} className="bg-brand-success text-white py-4 px-8 rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 text-sm uppercase tracking-widest transition-all">
-          <UserPlus size={22} /><span>Convidar Integrante</span>
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button onClick={() => setShowInviteModal(true)} className="bg-brand-success text-white py-4 px-8 rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 text-sm uppercase tracking-widest transition-all">
+            <UserPlus size={22} /><span>Convidar Integrante</span>
+          </button>
+        </div>
       </header>
 
       <div className="space-y-8 px-1">
@@ -177,7 +203,7 @@ const Users: React.FC = () => {
             const canManage = isCurrentSuperAdmin || (!isMaster && currentUser?.role === UserRole.COMPANY_ADMIN);
             return (
               <div key={user.id} className="enterprise-card p-6 flex flex-col justify-between group relative border-slate-800">
-                <div className="flex items-center gap-5"><div className={`w-14 h-14 rounded-2xl border-2 flex items-center justify-center text-2xl font-black ${isMaster ? 'bg-brand-success border-brand-success text-white' : 'bg-slate-800 border-slate-700 text-brand-success'}`}>{user.name.charAt(0)}</div><div className="flex-1 min-w-0"><h4 className="font-black text-lg truncate text-slate-100 uppercase tracking-tight">{user.name}</h4><p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">{user.email}</p></div></div>
+                <div className="flex items-center gap-5"><div className={`w-14 h-14 rounded-2xl border-2 flex items-center justify-center text-2xl font-black ${isMaster ? 'bg-brand-success border-brand-success text-white' : 'bg-slate-800 border-slate-700 text-brand-success'}`}>{user.name?.charAt(0) || '?'}</div><div className="flex-1 min-w-0"><h4 className="font-black text-lg truncate text-slate-100 uppercase tracking-tight">{user.name || 'Sem Nome'}</h4><p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">{user.email || 'Sem E-mail'}</p></div></div>
                 <div className="mt-8 pt-5 border-t border-slate-800 flex justify-between items-center">
                   <span className="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase border shadow-sm">{user.profile}</span>
                   {canManage && (

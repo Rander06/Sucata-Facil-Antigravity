@@ -75,7 +75,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const client = db.getCloudClient();
     if (client) {
       setIsSyncing(true);
-      const success = await db.syncFromCloud();
+      const success = await db.syncFromCloud(currentUser?.company_id || currentUser?.companyId);
       setIsSyncing(false);
       if (success) {
         refreshData();
@@ -104,7 +104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       db.reInitializeCloud();
       const hasCloud = !!db.getCloudClient();
       setIsCloudEnabled(hasCloud);
-      if (hasCloud) await db.syncFromCloud();
+      if (hasCloud) await db.syncFromCloud(null); // Sincroniza tabelas globais no init
       const storedUser = localStorage.getItem('auth_user');
       if (storedUser) {
         let user = JSON.parse(storedUser);
@@ -127,7 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const client = db.getCloudClient();
         if (client) {
           // Silent sync check
-          db.syncFromCloud().then(success => {
+          db.syncFromCloud(currentUser?.company_id || currentUser?.companyId).then(success => {
             if (success) {
               refreshData();
               refreshRequests();
@@ -142,11 +142,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshRequests();
       });
 
-      // Heartbeat: Update presence every 10 seconds
       const heartbeatInterval = setInterval(() => {
         if (currentUser) {
-          const now = new Date().toISOString();
-          db.update('users', currentUser.id, { updated_at: now });
+          const users = db.query<User>('users');
+          const exists = users.some(u => u.id === currentUser.id);
+          if (exists) {
+            const now = new Date().toISOString();
+            db.update('users', currentUser.id, { updated_at: now });
+          }
         }
       }, 10000);
 
@@ -165,11 +168,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Update Login Timestamp if not set recently (e.g., within last minute) to avoid spam on refresh
       const now = new Date().toISOString();
       const lastUpdate = currentUser.updated_at ? new Date(currentUser.updated_at).getTime() : 0;
-      if (Date.now() - lastUpdate > 60000) {
+      const users = db.query<User>('users');
+      const exists = users.some(u => u.id === currentUser.id);
+
+      if (exists && (Date.now() - lastUpdate > 60000)) {
         db.update('users', currentUser.id, { last_login: now, updated_at: now });
       }
 
-      db.syncFromCloud();
+      db.syncFromCloud(currentUser?.id ? (currentUser.company_id || currentUser.companyId) : null);
 
       // Initialize POS type if not set
       if (!posType) {

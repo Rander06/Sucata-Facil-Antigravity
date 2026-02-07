@@ -98,6 +98,12 @@ const FinanceHub: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLiquidating, setIsLiquidating] = useState(false);
+
+  // SaaS Scale: Controle de Paginação (Load More)
+  const ITEMS_PER_PAGE = 30;
+  const [baixasVisibleCount, setBaixasVisibleCount] = useState(ITEMS_PER_PAGE);
+  const [auditVisibleCount, setAuditVisibleCount] = useState(ITEMS_PER_PAGE);
+  const [walletVisibleCount, setWalletVisibleCount] = useState(ITEMS_PER_PAGE);
   const [isAuditing, setIsAuditing] = useState(false);
   const auditFormRef = useRef<HTMLFormElement>(null);
 
@@ -105,19 +111,79 @@ const FinanceHub: React.FC = () => {
 
 
 
-  const handleAuditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleAuditKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       const form = auditFormRef.current;
       if (!form) return;
-      const index = Array.from(form.elements).indexOf(e.currentTarget as any);
-      if (index > -1) {
-        const nextElement = form.elements[index + 1] as HTMLElement;
-        if (nextElement && (nextElement.tagName === 'INPUT' || nextElement.tagName === 'SELECT' || nextElement.tagName === 'BUTTON')) {
-          nextElement.focus();
-        } else {
-          handleProcessReconciliation(e as any);
-        }
+      // Exclui BUTTON para não focar acidentalmente em "Cancelar" ou "Estornar"
+      const elements = Array.from(form.elements).filter(el => {
+        const element = el as HTMLElement;
+        const input = el as HTMLInputElement;
+        return (element.tagName === 'INPUT' || element.tagName === 'SELECT') &&
+          !element.hidden && input.type !== 'hidden';
+      });
+      const index = elements.indexOf(e.currentTarget as any);
+      if (index > -1 && index < elements.length - 1) {
+        const nextElement = elements[index + 1] as HTMLElement;
+        nextElement.focus();
+      } else {
+        handleProcessReconciliation(e as any);
+      }
+    }
+  };
+
+  const handleNewTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    if (e.key === 'Enter') {
+      // Se for textarea, permite nova linha com Shift+Enter
+      if (e.currentTarget.tagName === 'TEXTAREA' && e.shiftKey) return;
+
+      e.preventDefault();
+      const form = e.currentTarget.form;
+      if (!form) return;
+
+      // Exclui BUTTON da navegação pelo Enter
+      const elements = Array.from(form.elements).filter(el => {
+        const element = el as HTMLElement;
+        const input = el as HTMLInputElement;
+        return (element.tagName === 'INPUT' || element.tagName === 'SELECT' || element.tagName === 'TEXTAREA') &&
+          !element.hidden && input.type !== 'hidden' &&
+          !element.classList.contains('sr-only');
+      }) as HTMLElement[];
+
+      const index = elements.indexOf(e.currentTarget as HTMLElement);
+      if (index > -1 && index < elements.length - 1) {
+        // Se o próximo elemento for o botão de parceiro (que é um button type="button"), foca ele
+        const nextElement = elements[index + 1];
+        nextElement.focus();
+      } else {
+        handleCreateTitle(e as any);
+      }
+    }
+  };
+
+  const handleWalletKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    if (e.key === 'Enter') {
+      if (e.currentTarget.tagName === 'TEXTAREA' && e.shiftKey) return;
+
+      e.preventDefault();
+      const form = e.currentTarget.form;
+      if (!form) return;
+
+      // Exclui BUTTON para que o Enter no último campo chame o submit direto
+      const elements = Array.from(form.elements).filter(el => {
+        const element = el as HTMLElement;
+        const input = el as HTMLInputElement;
+        return (element.tagName === 'INPUT' || element.tagName === 'SELECT' || element.tagName === 'TEXTAREA') &&
+          !element.hidden && input.type !== 'hidden';
+      }) as HTMLElement[];
+
+      const index = elements.indexOf(e.currentTarget as HTMLElement);
+      if (index > -1 && index < elements.length - 1) {
+        const nextElement = elements[index + 1];
+        nextElement.focus();
+      } else {
+        handleWalletManualSubmit(e as any);
       }
     }
   };
@@ -592,7 +658,7 @@ const FinanceHub: React.FC = () => {
             saldo_real: 0,
             categoria: 'TRANSFERÊNCIA',
             parceiro: 'CARTEIRA',
-            descricao: 'TRANSFERÊNCIA P/ CAIXA FINANCEIRO (ABERTURA)',
+            descricao: `TRANSFERÊNCIA P/ CAIXA FINANCEIRO (FUNDO DE TROCO) - TURNO ${session.id.slice(0, 6).toUpperCase()}`,
             payment_term_id: null,
             operador_id: currentUser.id,
             operador_name: currentUser.name,
@@ -711,14 +777,19 @@ const FinanceHub: React.FC = () => {
       e.preventDefault();
       const form = closingFormRef.current;
       if (!form) return;
-      const index = Array.from(form.elements).indexOf(e.currentTarget as any);
-      if (index > -1) {
-        const nextElement = form.elements[index + 1] as HTMLElement;
-        if (nextElement && (nextElement.tagName === 'INPUT' || nextElement.tagName === 'BUTTON')) {
-          nextElement.focus();
-        } else {
-          handleFinalCloseFinanceShift(e as any);
-        }
+      // Exclui BUTTON da navegação pelo Enter
+      const elements = Array.from(form.elements).filter(el => {
+        const element = el as HTMLElement;
+        const input = el as HTMLInputElement;
+        return (element.tagName === 'INPUT' || element.tagName === 'SELECT') &&
+          !element.hidden && input.type !== 'hidden';
+      });
+      const index = elements.indexOf(e.currentTarget as any);
+      if (index > -1 && index < elements.length - 1) {
+        const nextElement = elements[index + 1] as HTMLElement;
+        nextElement.focus();
+      } else {
+        handleFinalCloseFinanceShift(e as any);
       }
     }
   };
@@ -1290,6 +1361,76 @@ const FinanceHub: React.FC = () => {
     });
   }, [cashierSessions, auditDateStart, auditDateEnd, auditOperatorFilter, auditAuditorFilter, auditFilterSessionId, auditFilterStatus]);
 
+  const auditMetrics = useMemo(() => {
+    const metrics = {
+      total: { count: 0, val: 0, pdv: { count: 0, val: 0 }, fin: { count: 0, val: 0 } },
+      pending: { count: 0, val: 0, pdv: { count: 0, val: 0 }, fin: { count: 0, val: 0 } },
+      reconciled: { count: 0, val: 0, pdv: { count: 0, val: 0 }, fin: { count: 0, val: 0 } },
+      diffs: { count: 0, val: 0, pdv: { count: 0, val: 0 }, fin: { count: 0, val: 0 } }
+    };
+
+    filteredSessions.forEach(session => {
+      const sessionRecords = allFinancialRecords.filter(r => r.caixa_id === session.id && r.status !== 'reversed' && r.status !== 'cancelled' && r.categoria !== 'Abertura de Caixa');
+      const cashRecords = sessionRecords.filter(r => {
+        const tId = r.payment_term_id || r.paymentTermId;
+        const term = allPaymentTerms.find(t => t.id === tId || t.uuid === tId);
+        const name = (term?.name || '').toUpperCase();
+        return name.includes('DINHEIRO') || name === 'À VISTA';
+      });
+      const checkRecords = sessionRecords.filter(r => {
+        const tId = r.payment_term_id || r.paymentTermId;
+        const term = allPaymentTerms.find(t => t.id === tId || t.uuid === tId);
+        const name = (term?.name || '').toUpperCase();
+        return name.includes('CHEQUE');
+      });
+
+      const totalCashInputs = cashRecords.filter(r => r.natureza === 'ENTRADA').reduce((sum, r) => sum + r.valor, 0);
+      const totalCashOutputs = cashRecords.filter(r => r.natureza === 'SAIDA').reduce((sum, r) => sum + r.valor, 0);
+      const totalCheckInputs = checkRecords.filter(r => r.natureza === 'ENTRADA').reduce((sum, r) => sum + r.valor, 0);
+
+      const opening = session.openingBalance || session.opening_balance || 0;
+      const valorReal = opening + (totalCashInputs + totalCheckInputs) - totalCashOutputs;
+      const valorInformado = session.closingBalance || session.closing_balance || 0;
+      const valorAuditado = session.reconciledBalance || session.reconciled_balance || 0;
+      const isReconciled = session.status === 'reconciled';
+      const isPDV = session.type !== 'finance';
+
+      // 1. TOTAL
+      metrics.total.count++;
+      metrics.total.val += valorReal;
+      if (isPDV) { metrics.total.pdv.count++; metrics.total.pdv.val += valorReal; }
+      else { metrics.total.fin.count++; metrics.total.fin.val += valorReal; }
+
+      // 2. PENDING (Closed)
+      if (session.status === 'closed') {
+        metrics.pending.count++;
+        metrics.pending.val += valorReal;
+        if (isPDV) { metrics.pending.pdv.count++; metrics.pending.pdv.val += valorReal; }
+        else { metrics.pending.fin.count++; metrics.pending.fin.val += valorReal; }
+      }
+
+      // 3. RECONCILED
+      if (isReconciled) {
+        metrics.reconciled.count++;
+        metrics.reconciled.val += valorAuditado;
+        if (isPDV) { metrics.reconciled.pdv.count++; metrics.reconciled.pdv.val += valorAuditado; }
+        else { metrics.reconciled.fin.count++; metrics.reconciled.fin.val += valorAuditado; }
+      }
+
+      // 4. DIFFS
+      const compareValue = isReconciled ? valorAuditado : valorInformado;
+      const diff = compareValue - valorReal;
+      if (Math.abs(diff) > 0.005) {
+        metrics.diffs.count++;
+        metrics.diffs.val += diff;
+        if (isPDV) { metrics.diffs.pdv.count++; metrics.diffs.pdv.val += diff; }
+        else { metrics.diffs.fin.count++; metrics.diffs.fin.val += diff; }
+      }
+    });
+
+    return metrics;
+  }, [filteredSessions, allFinancialRecords, allPaymentTerms]);
+
   const sessionBaixas = useMemo(() => {
     if (!activeFinanceSession) return [];
     // Show ALL records linked to this session (both Liquidations and new Provisions)
@@ -1432,17 +1573,30 @@ const FinanceHub: React.FC = () => {
     if (!liquidationModal.record || isLiquidating) return;
     setIsLiquidating(true);
     try {
-      await db.update('financials', liquidationModal.record.id, {
+      console.log("[FINANCE] Liquidating record:", liquidationModal.record.id);
+
+      const updatePayload: any = {
         status: 'paid',
+        payment_term_id: liquidationModal.termId,
         paymentTermId: liquidationModal.termId,
         liquidation_date: db.getNowISO(),
+        liquidationDate: db.getNowISO(),
         due_date: liquidationModal.dueDate,
-        caixa_id: activeFinanceSession.id // Use Finance Session ID
-      });
+        dueDate: liquidationModal.dueDate,
+        caixa_id: activeFinanceSession.id,
+        caixaId: activeFinanceSession.id,
+        updated_at: db.getNowISO()
+      };
+
+      await db.update('financials', liquidationModal.record.id, updatePayload);
+
+      console.log("[FINANCE] Liquidation success for record:", liquidationModal.record.id);
+
       setLiquidationModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' });
       triggerRefresh();
     } catch (err: any) {
-      alert("Erro: " + err.message);
+      console.error("[FINANCE] Liquidation error:", err);
+      alert("Erro ao liquidar: " + err.message);
     } finally {
       setIsLiquidating(false);
     }
@@ -1976,6 +2130,7 @@ const FinanceHub: React.FC = () => {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success transition-all"
                     value={newTitleForm.categoria}
                     onChange={e => setNewTitleForm({ ...newTitleForm, categoria: e.target.value })}
+                    onKeyDown={handleNewTitleKeyDown}
                   >
                     <option value="">SELECIONE...</option>
                     {financeCategories
@@ -1994,6 +2149,7 @@ const FinanceHub: React.FC = () => {
                       id="modal-newTitle-parceiro"
                       type="button"
                       onClick={() => setIsNewTitlePartnerMenuOpen(!isNewTitlePartnerMenuOpen)}
+                      onKeyDown={handleNewTitleKeyDown}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success text-left flex items-center justify-between transition-all"
                     >
                       <span className={`truncate ${newTitleForm.parceiro ? 'text-white' : 'text-slate-600 italic'}`}>
@@ -2063,6 +2219,7 @@ const FinanceHub: React.FC = () => {
                       }
                       setNewTitleForm({ ...newTitleForm, payment_term_id: val, vencimento: newVenc });
                     }}
+                    onKeyDown={handleNewTitleKeyDown}
                   >
                     <option value="">SELECIONE...</option>
                     {allPaymentTerms
@@ -2083,6 +2240,7 @@ const FinanceHub: React.FC = () => {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-bold text-xs outline-none focus:border-brand-success transition-all [color-scheme:dark]"
                     value={newTitleForm.vencimento}
                     onChange={e => setNewTitleForm({ ...newTitleForm, vencimento: e.target.value })}
+                    onKeyDown={handleNewTitleKeyDown}
                   />
                 </div>
 
@@ -2099,6 +2257,7 @@ const FinanceHub: React.FC = () => {
                       placeholder="0,00"
                       value={newTitleForm.valor}
                       onChange={e => setNewTitleForm({ ...newTitleForm, valor: e.target.value })}
+                      onKeyDown={handleNewTitleKeyDown}
                     />
                   </div>
                 </div>
@@ -2114,6 +2273,7 @@ const FinanceHub: React.FC = () => {
                     placeholder="Ex: Pagamento de Fornecedor X..."
                     value={newTitleForm.descricao}
                     onChange={e => setNewTitleForm({ ...newTitleForm, descricao: e.target.value })}
+                    onKeyDown={handleNewTitleKeyDown}
                   />
                 </div>
               </div>
@@ -2172,118 +2332,83 @@ const FinanceHub: React.FC = () => {
       {/* MODAL BAIXAS */}
       {activeModal === 'baixas' && (
         <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
-          <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
-            <div className="flex items-center gap-3 w-full md:w-auto justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-brand-success/10 flex items-center justify-center text-brand-success border border-brand-success/20">
-                  <ListChecks size={18} />
-                </div>
-                <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Liquidação</h2>
+          <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0 no-print">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-brand-success/10 flex items-center justify-center text-brand-success border border-brand-success/20">
+                <ListChecks size={18} />
               </div>
-              <button onClick={() => setActiveModal(null)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all">
-                <X size={18} />
+              <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Liquidação</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
+                <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
+                <X size={20} />
               </button>
             </div>
-
-            <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-              <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                <div className="flex flex-col">
-                  <label htmlFor="baixas-dateStart" className="sr-only">Data Inicial</label>
-                  <input id="baixas-dateStart" name="baixas-dateStart" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
-                </div>
-                <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                <div className="flex flex-col">
-                  <label htmlFor="baixas-dateEnd" className="sr-only">Data Final</label>
-                  <input id="baixas-dateEnd" name="baixas-dateEnd" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
-                </div>
-              </div>
+          </header>
 
 
-
-              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-                <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
-                  {/* SEARCH FILTERS MOBILE 2-COL */}
-
-                  {/* ROW 1: Partner & Session */}
-                  <div className="col-span-1 md:order-4 md:w-auto">
-                    <label htmlFor="fs-99-filter-partner" className="sr-only">Filtrar Parceiro</label>
-                    <input
-                      id="fs-99-filter-partner"
-                      name="fs-99-filter-partner"
-                      type="text"
-                      list="partner-list-options"
-                      placeholder="Filtrar Parceiro..."
-                      className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-32 placeholder:text-slate-600"
-                      value={filterPartner}
-                      onChange={e => setFilterPartner(e.target.value)}
-                      autoComplete="new-password"
-                    />
+          <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
+            <div className="max-w-7xl mx-auto space-y-6">
+              {/* FILTROS E BUSCA (MOVIDO DO HEADER) */}
+              <div className="flex flex-col md:flex-row bg-slate-900 p-4 rounded-2xl border border-slate-800 items-center justify-between gap-6 w-full no-print">
+                <div className="flex items-center gap-4">
+                  <Calendar size={18} className="text-brand-success" />
+                  <div className="flex items-center gap-3">
+                    <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                    <span className="text-slate-600 font-bold text-[10px]">ATÉ</span>
+                    <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-success [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
                   </div>
-                  <datalist id="partner-list-options">
-                    {partners.map(p => <option key={p.id} value={(p.name || '').toUpperCase()} />)}
-                  </datalist>
+                </div>
 
-                  <div className="col-span-1 md:order-3 md:w-auto">
-                    <label htmlFor="fs-99-filter-session" className="sr-only">Turno ID</label>
-                    <input
-                      id="fs-99-filter-session"
-                      name="fs-99-filter-session"
-                      type="text"
-                      placeholder="Turno ID..."
-                      className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24 placeholder:text-slate-600"
-                      value={filterSession}
-                      onChange={e => setFilterSession(e.target.value)}
-                      autoComplete="new-password"
-                    />
-                  </div>
-
-                  {/* ROW 2: Search Title & Status */}
-                  <div className="col-span-1 md:order-1 md:relative md:w-56">
-                    <label htmlFor="fs-99-search-term" className="sr-only">Filtrar títulos</label>
-                    <div className="relative w-full">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 md:block hidden" size={12} />
+                <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
+                  <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
+                    <div className="col-span-1 md:w-auto">
                       <input
-                        id="fs-99-search-term"
-                        name="fs-99-search-term"
                         type="text"
-                        placeholder="Filtrar títulos..."
-                        className="w-full bg-slate-900 border border-slate-800 px-3 md:pl-8 md:pr-3 py-1.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success placeholder:text-slate-600"
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                        autoComplete="new-password"
+                        list="partner-list-options"
+                        placeholder="Parceiro..."
+                        className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-32 placeholder:text-slate-600"
+                        value={filterPartner}
+                        onChange={e => setFilterPartner(e.target.value)}
                       />
                     </div>
+                    <div className="col-span-1 md:w-auto">
+                      <input
+                        type="text"
+                        placeholder="Turno ID..."
+                        className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24 placeholder:text-slate-600"
+                        value={filterSession}
+                        onChange={e => setFilterSession(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-1 md:relative md:w-48">
+                      <div className="relative w-full">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={10} />
+                        <input
+                          type="text"
+                          placeholder="Títulos..."
+                          className="w-full bg-slate-950 border border-slate-800 pl-8 pr-3 py-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success placeholder:text-slate-600"
+                          value={searchTerm}
+                          onChange={e => setSearchTerm(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-1 md:w-auto">
+                      <select
+                        className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
+                        value={filterStatus}
+                        onChange={e => setFilterStatus(e.target.value)}
+                      >
+                        <option value="">STATUS</option>
+                        <option value="ABERTO">ABERTO</option>
+                        <option value="ATRASADO">ATRASADO</option>
+                      </select>
+                    </div>
                   </div>
-
-                  <div className="col-span-1 md:order-2 md:w-auto">
-                    <label htmlFor="baixas-filterStatus" className="sr-only">Status</label>
-                    <select
-                      id="baixas-filterStatus"
-                      name="baixas-filterStatus"
-                      className="bg-slate-900 border border-slate-800 p-1.5 px-2.5 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
-                      value={filterStatus}
-                      onChange={e => setFilterStatus(e.target.value)}
-                    >
-                      <option value="">TODOS STATUS</option>
-                      <option value="ABERTO">ABERTO</option>
-                      <option value="ATRASADO">ATRASADO</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="w-full md:w-auto mt-2 md:mt-0">
                   <button
                     onClick={() => {
-                      setNewTitleForm({
-                        natureza: 'SAIDA',
-                        tipo: 'despesa',
-                        valor: '',
-                        categoria: '',
-                        parceiro: '',
-                        vencimento: db.getToday(),
-                        descricao: '',
-                        id: ''
-                      } as any);
+                      setNewTitleForm({ natureza: 'SAIDA', tipo: 'despesa', valor: '', categoria: '', parceiro: '', vencimento: db.getToday(), descricao: '', id: '' } as any);
                       setShowNewTitleModal(true);
                     }}
                     className="w-full md:w-auto bg-brand-success text-brand-dark px-4 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg shadow-brand-success/20 hover:scale-105 transition-all flex items-center justify-center gap-2"
@@ -2291,93 +2416,96 @@ const FinanceHub: React.FC = () => {
                     <Plus size={16} /> Novo Título
                   </button>
                 </div>
-
-                <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
-                  <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-          </header>
-
-
-          <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
-            <div className="max-w-7xl mx-auto space-y-8">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 no-print [&>*:nth-child(odd):last-child]:col-span-2">
-                <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">A Receber (Aberto)</p>
-                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.abertoIn)}</h3>
-                  <div className="flex items-center gap-1.5 mt-2 text-brand-success"><TrendingUp size={12} /><span className="text-[8px] font-bold uppercase">Projeção de Entrada</span></div>
-                </div>
-                <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/5 shadow-lg">
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">A Pagar (Aberto)</p>
-                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.abertoOut)}</h3>
-                  <div className="flex items-center gap-1.5 mt-2 text-brand-error"><TrendingDown size={12} /><span className="text-[8px] font-bold uppercase">Projeção de Saída</span></div>
-                </div>
-                <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/20 shadow-lg">
-                  <p className="text-[9px] font-black text-brand-error uppercase tracking-widest mb-1">Atrasados (Saídas)</p>
-                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.atrasadoOut)}</h3>
-                  <div className="flex items-center gap-1.5 mt-2 text-brand-error animate-pulse"><AlertTriangle size={12} /><span className="text-[8px] font-bold uppercase">Vencidos em Aberto</span></div>
-                </div>
-                <div className="enterprise-card p-5 border-l-4 border-l-brand-warning bg-brand-warning/10 shadow-lg">
-                  <p className="text-[9px] font-black text-brand-warning uppercase tracking-widest mb-1">Atrasados (Entradas)</p>
-                  <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.atrasadoIn)}</h3>
-                  <div className="flex items-center gap-1.5 mt-2 text-brand-warning"><AlertCircle size={12} /><span className="text-[8px] font-bold uppercase">Crédito Pendente</span></div>
-                </div>
               </div>
 
+              <div className="max-w-7xl mx-auto space-y-8">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 no-print [&>*:nth-child(odd):last-child]:col-span-2">
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">A Receber (Aberto)</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.abertoIn)}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-brand-success"><TrendingUp size={12} /><span className="text-[8px] font-bold uppercase">Projeção de Entrada</span></div>
+                  </div>
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">A Pagar (Aberto)</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.abertoOut)}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-brand-error"><TrendingDown size={12} /><span className="text-[8px] font-bold uppercase">Projeção de Saída</span></div>
+                  </div>
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-error bg-brand-error/20 shadow-lg">
+                    <p className="text-[9px] font-black text-brand-error uppercase tracking-widest mb-1">Atrasados (Saídas)</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.atrasadoOut)}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-brand-error animate-pulse"><AlertTriangle size={12} /><span className="text-[8px] font-bold uppercase">Vencidos em Aberto</span></div>
+                  </div>
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-warning bg-brand-warning/10 shadow-lg">
+                    <p className="text-[9px] font-black text-brand-warning uppercase tracking-widest mb-1">Atrasados (Entradas)</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(baixasMetrics.atrasadoIn)}</h3>
+                    <div className="flex items-center gap-1.5 mt-2 text-brand-warning"><AlertCircle size={12} /><span className="text-[8px] font-bold uppercase">Crédito Pendente</span></div>
+                  </div>
+                </div>
 
 
-              {(filterType === 'ALL' || filterType === 'ENTRADA') && (
-                <TableLayout
-                  title="A Receber (Vendas e Entradas)"
-                  items={filteredItems.filter(f => f.natureza === 'ENTRADA')}
-                  icon={ArrowUpCircle}
-                  iconColor="text-brand-success"
-                  partners={partners}
-                  users={teamUsers}
-                  activeSession={activeSession}
-                  isLiquidating={isLiquidating}
-                  setLiquidationModal={setLiquidationModal}
-                  onEdit={handleEditTitle}
-                  onDelete={handleDeleteTitle}
-                  onReverse={handleReverseLiquidation}
-                />
-              )}
-              {(filterType === 'ALL' || filterType === 'SAIDA') && (
-                <TableLayout
-                  title="A Pagar (Compras e Despesas)"
-                  items={filteredItems.filter(f => f.natureza === 'SAIDA')}
-                  icon={ArrowDownCircle}
-                  iconColor="text-brand-error"
-                  partners={partners}
-                  users={teamUsers}
-                  activeSession={activeSession}
-                  isLiquidating={isLiquidating}
-                  setLiquidationModal={setLiquidationModal}
-                  onEdit={handleEditTitle}
-                  onDelete={handleDeleteTitle}
-                  onReverse={handleReverseLiquidation}
-                />
-              )}
 
-              {activeFinanceSession && sessionBaixas.length > 0 && (
-                <div className="mt-12 pt-8 border-t border-slate-800/50">
+                {(filterType === 'ALL' || filterType === 'ENTRADA') && (
                   <TableLayout
-                    title="Histórico de Movimentações do Turno"
-                    items={sessionBaixas}
-                    icon={CheckCircle2}
-                    iconColor="text-blue-400"
+                    title="A Receber (Vendas e Entradas)"
+                    items={filteredItems.filter(f => f.natureza === 'ENTRADA').slice(0, baixasVisibleCount)}
+                    icon={ArrowUpCircle}
+                    iconColor="text-brand-success"
                     partners={partners}
                     users={teamUsers}
-                    activeSession={activeFinanceSession}
-                    isLiquidating={false}
-                    setLiquidationModal={() => { }}
+                    activeSession={activeSession}
+                    isLiquidating={isLiquidating}
+                    setLiquidationModal={setLiquidationModal}
+                    onEdit={handleEditTitle}
+                    onDelete={handleDeleteTitle}
                     onReverse={handleReverseLiquidation}
-                    showBaixar={false}
                   />
-                </div>
-              )}
+                )}
+                {(filterType === 'ALL' || filterType === 'SAIDA') && (
+                  <TableLayout
+                    title="A Pagar (Compras e Despesas)"
+                    items={filteredItems.filter(f => f.natureza === 'SAIDA').slice(0, baixasVisibleCount)}
+                    icon={ArrowDownCircle}
+                    iconColor="text-brand-error"
+                    partners={partners}
+                    users={teamUsers}
+                    activeSession={activeSession}
+                    isLiquidating={isLiquidating}
+                    setLiquidationModal={setLiquidationModal}
+                    onEdit={handleEditTitle}
+                    onDelete={handleDeleteTitle}
+                    onReverse={handleReverseLiquidation}
+                  />
+                )}
+
+                {filteredItems.length > baixasVisibleCount && (
+                  <div className="flex justify-center pt-8 no-print">
+                    <button
+                      onClick={() => setBaixasVisibleCount(prev => prev + ITEMS_PER_PAGE)}
+                      className="px-8 py-3 bg-slate-800 text-slate-400 hover:text-white border border-slate-700 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-2"
+                    >
+                      <Plus size={16} /> Carregar Mais Registros (Exibindo {baixasVisibleCount} de {filteredItems.length})
+                    </button>
+                  </div>
+                )}
+
+                {activeFinanceSession && sessionBaixas.length > 0 && (
+                  <div className="mt-12 pt-8 border-t border-slate-800/50">
+                    <TableLayout
+                      title="Histórico de Movimentações do Turno"
+                      items={sessionBaixas}
+                      icon={CheckCircle2}
+                      iconColor="text-blue-400"
+                      partners={partners}
+                      users={teamUsers}
+                      activeSession={activeFinanceSession}
+                      isLiquidating={false}
+                      setLiquidationModal={() => { }}
+                      onReverse={handleReverseLiquidation}
+                      showBaixar={false}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </main>
         </div >
@@ -2387,102 +2515,159 @@ const FinanceHub: React.FC = () => {
       {
         activeModal === 'conferencia' && (
           <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
-            <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
-              <div className="flex items-center gap-3 w-full md:w-auto justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-brand-warning/10 flex items-center justify-center text-brand-warning border border-brand-warning/20">
-                    <ShieldCheck size={18} />
-                  </div>
-                  <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
+            <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0 no-print">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-brand-warning/10 flex items-center justify-center text-brand-warning border border-brand-warning/20">
+                  <ShieldCheck size={18} />
                 </div>
-                <button onClick={() => setActiveModal(null)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all">
-                  <X size={18} />
-                </button>
+                <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Auditoria de Turnos</h2>
               </div>
-              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-                {/* DATE RANGE - KEEP AS IS BUT FULL WIDTH MOBILE */}
-                <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                  <div className="flex flex-col flex-1 md:flex-none">
-                    <label htmlFor="auditDateStart" className="sr-only">Data Inicial Auditoria</label>
-                    <input id="auditDateStart" name="auditDateStart" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
-                  </div>
-                  <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                  <div className="flex flex-col flex-1 md:flex-none">
-                    <label htmlFor="auditDateEnd" className="sr-only">Data Final Auditoria</label>
-                    <input id="auditDateEnd" name="auditDateEnd" type="date" autoComplete="new-password" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
-                  {/* MOBILE ROW 1: ID & STATUS */}
-                  <div className="col-span-1 md:w-auto">
-                    <label htmlFor="search_fld_v99" className="sr-only">Filtrar Turno</label>
-                    <input
-                      id="search_fld_v99"
-                      name="search_fld_v99_random"
-                      type="text"
-                      placeholder="Filtrar..."
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-24 placeholder:text-slate-700"
-                      value={auditFilterSessionId}
-                      onChange={e => setAuditFilterSessionId(e.target.value)}
-                      autoComplete="one-time-code"
-                    />
-                  </div>
-
-                  <div className="col-span-1 md:w-auto">
-                    <label htmlFor="auditFilterStatus" className="sr-only">Status Auditoria</label>
-                    <select
-                      id="auditFilterStatus"
-                      name="auditFilterStatus"
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
-                      value={auditFilterStatus}
-                      onChange={e => setAuditFilterStatus(e.target.value)}
-                    >
-                      <option value="all">TODOS STATUS</option>
-                      <option value="open">ABERTO</option>
-                      <option value="closed">FECHADO</option>
-                      <option value="reconciled">CONFERIDO</option>
-                    </select>
-                  </div>
-
-                  {/* MOBILE ROW 2: OPERATOR & AUDITOR */}
-                  <div className="col-span-1 md:w-auto">
-                    <label htmlFor="auditOperatorFilter" className="sr-only">Operador Auditoria</label>
-                    <select
-                      id="auditOperatorFilter"
-                      name="auditOperatorFilter"
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
-                      value={auditOperatorFilter}
-                      onChange={e => setAuditOperatorFilter(e.target.value)}
-                    >
-                      <option value="all">TODOS OPERADORES</option>
-                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
-                    </select>
-                  </div>
-
-                  <div className="col-span-1 md:w-auto">
-                    <label htmlFor="auditAuditorFilter" className="sr-only">Auditor</label>
-                    <select
-                      id="auditAuditorFilter"
-                      name="auditAuditorFilter"
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-success w-full md:w-auto"
-                      value={auditAuditorFilter}
-                      onChange={e => setAuditAuditorFilter(e.target.value)}
-                    >
-                      <option value="all">TODOS AUDITORES</option>
-                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
                   <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
-                  <X size={18} />
+                  <X size={20} />
                 </button>
               </div>
             </header>
             <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
               <div className="max-w-7xl mx-auto space-y-6">
+                {/* FILTROS AUDITORIA (MOVIDO DO HEADER) */}
+                <div className="flex flex-col md:flex-row bg-slate-900 p-4 rounded-2xl border border-slate-800 items-center justify-between gap-6 w-full no-print">
+                  <div className="flex items-center gap-4">
+                    <Calendar size={18} className="text-brand-warning" />
+                    <div className="flex items-center gap-3">
+                      <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-warning [color-scheme:dark]" value={auditDateStart} onChange={e => setAuditDateStart(e.target.value)} />
+                      <span className="text-slate-600 font-bold text-[10px]">ATÉ</span>
+                      <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-brand-warning [color-scheme:dark]" value={auditDateEnd} onChange={e => setAuditDateEnd(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
+                    <input
+                      type="text"
+                      placeholder="ID Turno..."
+                      className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-warning w-full md:w-24 placeholder:text-slate-700"
+                      value={auditFilterSessionId}
+                      onChange={e => setAuditFilterSessionId(e.target.value)}
+                    />
+                    <select
+                      className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-warning w-full md:w-auto"
+                      value={auditFilterStatus}
+                      onChange={e => setAuditFilterStatus(e.target.value)}
+                    >
+                      <option value="all">STATUS</option>
+                      <option value="open">ABERTO</option>
+                      <option value="closed">FECHADO</option>
+                      <option value="reconciled">CONFERIDO</option>
+                    </select>
+                    <select
+                      className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-warning w-full md:w-auto"
+                      value={auditOperatorFilter}
+                      onChange={e => setAuditOperatorFilter(e.target.value)}
+                    >
+                      <option value="all">OPERADOR</option>
+                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
+                    </select>
+                    <select
+                      className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-brand-warning w-full md:w-auto"
+                      value={auditAuditorFilter}
+                      onChange={e => setAuditAuditorFilter(e.target.value)}
+                    >
+                      <option value="all">AUDITOR</option>
+                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* BALÕES DE RESUMO AUDITORIA */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 no-print [&>*:nth-child(even)]:border-l-slate-800 lg:[&>*:nth-child(even)]:border-l-0">
+                  <div className="enterprise-card p-5 border-l-4 border-l-blue-500 bg-blue-500/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Operado (Real)</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(auditMetrics.total.val)}</h3>
+                    <div className="flex flex-col mt-3 gap-2">
+                      <div className="flex items-center gap-1.5 text-blue-400">
+                        <Scale size={14} />
+                        <span className="text-[10px] font-bold uppercase">{auditMetrics.total.count} Turnos Totais</span>
+                      </div>
+                      <div className="flex flex-col gap-1 text-[9px] font-black text-slate-500 uppercase tracking-tight">
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>PDV: {auditMetrics.total.pdv.count} Turnos</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.total.pdv.val)}</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>FIN: {auditMetrics.total.fin.count} Turnos</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.total.fin.val)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-warning bg-brand-warning/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Aguardando Auditoria</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(auditMetrics.pending.val)}</h3>
+                    <div className="flex flex-col mt-3 gap-2">
+                      <div className="flex items-center gap-1.5 text-brand-warning">
+                        <Clock size={14} />
+                        <span className="text-[10px] font-bold uppercase">{auditMetrics.pending.count} Pendentes</span>
+                      </div>
+                      <div className="flex flex-col gap-1 text-[9px] font-black text-slate-500 uppercase tracking-tight">
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>PDV: {auditMetrics.pending.pdv.count} Qtd</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.pending.pdv.val)}</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>FIN: {auditMetrics.pending.fin.count} Qtd</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.pending.fin.val)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Saldos Conferidos</p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(auditMetrics.reconciled.val)}</h3>
+                    <div className="flex flex-col mt-3 gap-2">
+                      <div className="flex items-center gap-1.5 text-brand-success">
+                        <CheckCircle2 size={14} />
+                        <span className="text-[10px] font-bold uppercase">{auditMetrics.reconciled.count} Auditados</span>
+                      </div>
+                      <div className="flex flex-col gap-1 text-[9px] font-black text-slate-500 uppercase tracking-tight">
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>PDV: {auditMetrics.reconciled.pdv.count} Qtd</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.reconciled.pdv.val)}</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>FIN: {auditMetrics.reconciled.fin.count} Qtd</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.reconciled.fin.val)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`enterprise-card p-5 border-l-4 shadow-lg ${auditMetrics.diffs.val >= 0 ? 'border-l-brand-success bg-brand-success/5' : 'border-l-brand-error bg-brand-error/5'}`}>
+                    <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${auditMetrics.diffs.val >= 0 ? 'text-brand-success' : 'text-brand-error'}`}>
+                      {auditMetrics.diffs.val >= 0 ? 'Sobra de Caixa' : 'Quebra de Caixa'}
+                    </p>
+                    <h3 className="text-sm md:text-xl font-black text-white">R$ {formatCurrency(auditMetrics.diffs.val)}</h3>
+                    <div className="flex flex-col mt-3 gap-2">
+                      <div className={`flex items-center gap-1.5 ${auditMetrics.diffs.val >= 0 ? 'text-brand-success' : 'text-brand-error'}`}>
+                        <AlertTriangle size={14} />
+                        <span className="text-[10px] font-bold uppercase">{auditMetrics.diffs.count} com Diferença</span>
+                      </div>
+                      <div className="flex flex-col gap-1 text-[9px] font-black text-slate-500 uppercase tracking-tight">
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>PDV: {auditMetrics.diffs.pdv.count} Qtd</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.diffs.pdv.val)}</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-800/40 p-1.5 rounded-lg border border-slate-800/50">
+                          <span>FIN: {auditMetrics.diffs.fin.count} Qtd</span>
+                          <span className="text-white">R$ {formatCurrency(auditMetrics.diffs.fin.val)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="enterprise-card overflow-hidden shadow-2xl border-slate-800 bg-slate-900/10">
                   <div className="overflow-x-auto scrollbar-thick">
                     <table className="w-full text-left min-w-[900px]">
@@ -2502,7 +2687,7 @@ const FinanceHub: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40">
-                        {filteredSessions.map(session => {
+                        {filteredSessions.slice(0, auditVisibleCount).map(session => {
                           // Calculate System Balance (Valor Real) - "Entradas - Saídas em Dinheiro" + "Entradas em Cheque"
                           const sessionRecords = allFinancialRecords.filter(r => r.caixa_id === session.id && r.status !== 'reversed' && r.status !== 'cancelled' && r.categoria !== 'Abertura de Caixa');
 
@@ -2687,6 +2872,17 @@ const FinanceHub: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
+
+                  {filteredSessions.length > auditVisibleCount && (
+                    <div className="flex justify-center p-6 border-t border-slate-800 bg-slate-900/10">
+                      <button
+                        onClick={() => setAuditVisibleCount(prev => prev + ITEMS_PER_PAGE)}
+                        className="px-8 py-3 bg-slate-800 text-slate-400 hover:text-white border border-slate-700 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-2"
+                      >
+                        <Plus size={16} /> Carregar Mais Turnos (Exibindo {auditVisibleCount} de {filteredSessions.length})
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </main>
@@ -2697,88 +2893,68 @@ const FinanceHub: React.FC = () => {
       {
         activeModal === 'carteira' && (
           <div className="w-full flex flex-col bg-brand-dark animate-in fade-in duration-200 min-h-full">
-            <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 no-print gap-4">
-              <div className="flex items-center gap-3 w-full md:w-auto justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
-                    <Landmark size={18} />
-                  </div>
-                  <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Extrato Bancário</h2>
+            <header className="sticky top-0 z-50 bg-brand-card border-b border-slate-800 p-4 flex items-center justify-between shrink-0 no-print">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20">
+                  <Landmark size={18} />
                 </div>
-                <button onClick={() => setActiveModal(null)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all">
-                  <X size={18} />
-                </button>
+                <h2 className="text-xs md:text-lg font-black text-white uppercase tracking-tighter">Extrato Bancário</h2>
               </div>
-
-              <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-                <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 items-center justify-center gap-2 w-full md:w-auto">
-                  <div className="flex flex-col">
-                    <label htmlFor="bankStmt-dateStart" className="sr-only">Data Inicial Extrato</label>
-                    <input id="bankStmt-dateStart" name="bankStmt-dateStart" type="date" autoComplete="off" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
-                  </div>
-                  <span className="text-slate-600 font-bold text-[9px]">ATÉ</span>
-                  <div className="flex flex-col">
-                    <label htmlFor="bankStmt-dateEnd" className="sr-only">Data Final Extrato</label>
-                    <input id="bankStmt-dateEnd" name="bankStmt-dateEnd" type="date" autoComplete="off" className="bg-slate-950 p-1 text-[9px] font-black text-white w-full md:w-auto rounded outline-none [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
-                  <div className="w-full md:w-auto col-span-1 order-1 md:order-3">
-                    <label htmlFor="bankStmt-operatorFilter" className="sr-only">Operador</label>
-                    <select
-                      id="bankStmt-operatorFilter"
-                      name="bankStmt-operatorFilter"
-                      className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 w-full md:w-auto md:min-w-[150px]"
-                      value={walletFilterOperator}
-                      onChange={e => setWalletFilterOperator(e.target.value)}
-                    >
-                      <option value="">TODOS OPERADORES</option>
-                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
-                    </select>
-                  </div>
-
-                  <select
-                    id="bankStmt-bankFilter"
-                    name="bankStmt-bankFilter"
-                    className="bg-slate-900 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 w-full md:w-auto md:max-w-[150px] col-span-1 order-2 md:order-2"
-                    value={walletFilterBanco}
-                    onChange={e => setWalletFilterBanco(e.target.value)}
-                  >
-                    <option value="">TODOS BANCOS</option>
-                    {banks.map(b => <option key={b.id} value={b.name}>{(b.name || '').toUpperCase()}</option>)}
-                  </select>
-
-                  <div className="relative w-full md:w-64 col-span-1 order-3 md:order-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                    <input
-                      id="search_stmt_fld_v3"
-                      name="search_stmt_fld_v3_random"
-                      type="text"
-                      placeholder="Filtrar..."
-                      autoComplete="one-time-code"
-                      className="w-full bg-slate-900 border border-slate-800 pl-9 pr-4 py-2 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400 placeholder:text-slate-700"
-                      value={searchTerm}
-                      onChange={e => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-
-                  <button
-                    onClick={() => setShowWalletManualEntry(true)}
-                    className="w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all bg-brand-success text-white shadow-brand-success/20 hover:scale-105 col-span-1 order-4 md:order-4"
-                  >
-                    Novo Lançamento
-                  </button>
-                </div>
-
-                <button onClick={() => setActiveModal(null)} className="hidden md:flex p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all items-center gap-2 px-3 md:px-4">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setActiveModal(null)} className="p-2 text-slate-400 hover:text-white bg-slate-800 rounded-xl transition-all flex items-center gap-2 px-3 md:px-4">
                   <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Fechar</span>
-                  <X size={18} />
+                  <X size={20} />
                 </button>
               </div>
             </header>
             <main className="flex-1 overflow-y-auto p-3 md:p-8 bg-brand-dark custom-scrollbar">
               <div className="max-w-7xl mx-auto space-y-6">
+                {/* FILTROS EXTRATO (MOVIDO DO HEADER) */}
+                <div className="flex flex-col md:flex-row bg-slate-900 p-4 rounded-2xl border border-slate-800 items-center justify-between gap-6 w-full no-print">
+                  <div className="flex items-center gap-4">
+                    <Calendar size={18} className="text-blue-400" />
+                    <div className="flex items-center gap-3">
+                      <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-blue-400 [color-scheme:dark]" value={dateStart} onChange={e => setDateStart(e.target.value)} />
+                      <span className="text-slate-600 font-bold text-[10px]">ATÉ</span>
+                      <input type="date" className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-[10px] font-black uppercase text-white outline-none focus:border-blue-400 [color-scheme:dark]" value={dateEnd} onChange={e => setDateEnd(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 w-full md:flex md:w-auto md:items-center">
+                    <select
+                      className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 w-full md:w-auto"
+                      value={walletFilterOperator}
+                      onChange={e => setWalletFilterOperator(e.target.value)}
+                    >
+                      <option value="">OPERADOR</option>
+                      {teamUsers.map(u => <option key={u.id} value={u.id}>{(u.name || '').toUpperCase()}</option>)}
+                    </select>
+                    <select
+                      className="bg-slate-950 border border-slate-800 p-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 w-full md:w-auto"
+                      value={walletFilterBanco}
+                      onChange={e => setWalletFilterBanco(e.target.value)}
+                    >
+                      <option value="">BANCOS</option>
+                      {banks.map(b => <option key={b.id} value={b.name}>{(b.name || '').toUpperCase()}</option>)}
+                    </select>
+                    <div className="relative w-full md:w-48">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={10} />
+                      <input
+                        type="text"
+                        placeholder="Filtrar..."
+                        className="w-full bg-slate-950 border border-slate-800 pl-8 pr-3 py-2 rounded-xl text-white font-bold text-[10px] outline-none focus:border-blue-400 placeholder:text-slate-700"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                      />
+                    </div>
+                    <button
+                      onClick={() => setShowWalletManualEntry(true)}
+                      className="w-full md:w-auto px-5 py-2 rounded-xl font-black uppercase text-[10px] shadow-lg transition-all bg-brand-success text-brand-dark shadow-brand-success/20 hover:scale-105"
+                    >
+                      Novo Lançamento
+                    </button>
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 no-print [&>*:nth-child(odd):last-child]:col-span-2">
                   <div className="enterprise-card p-5 border-l-4 border-l-brand-success bg-brand-success/5 shadow-lg">
@@ -2819,7 +2995,7 @@ const FinanceHub: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40">
-                        {dynamicWalletData.map((t: any) => {
+                        {dynamicWalletData.slice(0, walletVisibleCount).map((t: any) => {
                           const term = allHubTerms.find(term => term.id === t.payment_term_id || term.uuid === t.payment_term_id);
                           const bank = banks.find(b => b.id === t.parceiro);
                           const operator = teamUsers.find(u => u.id === t.user_id || (u as any).user_id === t.user_id);
@@ -2849,10 +3025,7 @@ const FinanceHub: React.FC = () => {
                                     {isSystem ? (
                                       null // Removido botão de estorno de conferência do extrato por pedido do usuário
                                     ) : (
-                                      <>
-                                        <button onClick={() => handleEditTransaction(t)} className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all" title="Editar"><Edit size={14} /></button>
-                                        <button onClick={() => handleDeleteTransaction(t.id || t.uuid)} className="p-2 text-brand-error hover:bg-brand-error/10 rounded-lg transition-all" title="Cancelar Lançamento"><Trash2 size={14} /></button>
-                                      </>
+                                      <button onClick={() => handleDeleteTransaction(t.id || t.uuid)} className="p-2 text-brand-error hover:bg-brand-error/10 rounded-lg transition-all" title="Cancelar Lançamento"><Trash2 size={14} /></button>
                                     )}
                                   </div>
                                 )}
@@ -2866,6 +3039,17 @@ const FinanceHub: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
+
+                  {dynamicWalletData.length > walletVisibleCount && (
+                    <div className="flex justify-center p-6 border-t border-slate-800 bg-slate-900/10">
+                      <button
+                        onClick={() => setWalletVisibleCount(prev => prev + ITEMS_PER_PAGE)}
+                        className="px-8 py-3 bg-slate-800 text-slate-400 hover:text-white border border-slate-700 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all flex items-center gap-2"
+                      >
+                        <Plus size={16} /> Carregar Mais Movimentações (Exibindo {walletVisibleCount} de {dynamicWalletData.length})
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </main>
@@ -2882,7 +3066,26 @@ const FinanceHub: React.FC = () => {
                 <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><CheckCircle2 className="text-brand-success" /> Efetivar Baixa Financeira</h2>
                 <button onClick={() => setLiquidationModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' })}><X size={24} className="text-slate-500" /></button>
               </div>
-              <form onSubmit={handleProcessLiquidation} className="p-8 space-y-6" autoComplete="off">
+              <form
+                onSubmit={handleProcessLiquidation}
+                className="p-8 space-y-6"
+                autoComplete="off"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const target = e.target as HTMLElement;
+                    if (target.tagName === 'INPUT' || target.tagName === 'SELECT') {
+                      e.preventDefault();
+                      const form = target.closest('form');
+                      if (!form) return;
+                      const elements = Array.from(form.querySelectorAll('input, select, button[type="submit"]')) as HTMLElement[];
+                      const index = elements.indexOf(target);
+                      if (index > -1 && index < elements.length - 1) {
+                        elements[index + 1].focus();
+                      }
+                    }
+                  }
+                }}
+              >
                 <div className="p-5 bg-slate-900 rounded-2xl border border-slate-800 shadow-inner">
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Título / Identificação</p>
                   <p className="text-white font-bold text-sm uppercase leading-tight">{liquidationModal.record.description}</p>
@@ -2891,38 +3094,84 @@ const FinanceHub: React.FC = () => {
                     <p className={`text-[10px] font-black uppercase px-2 py-1 rounded border ${liquidationModal.record.natureza === 'ENTRADA' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' : 'bg-brand-error/10 text-brand-error border-brand-error/20'}`}>{liquidationModal.record.natureza}</p>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label htmlFor="liquidation-termId" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Meio de Pagamento (Destino/Origem)</label>
-                  <select
-                    id="liquidation-termId"
-                    name="payment_term_id"
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success transition-all shadow-inner"
-                    value={liquidationModal.termId}
-                    onChange={e => {
-                      const selId = e.target.value;
-                      const terms = liquidationModal.record?.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms;
-                      const term = terms.find(t => t.id === selId || t.uuid === selId);
-                      const days = term?.days || 0;
-                      const calcDate = new Date();
-                      calcDate.setDate(calcDate.getDate() + days);
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="liquidation-termId" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Meio de Pagamento (Destino/Origem)</label>
+                    <select
+                      id="liquidation-termId"
+                      name="payment_term_id"
+                      required
+                      className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success transition-all shadow-inner"
+                      value={liquidationModal.termId}
+                      onChange={e => {
+                        const selId = e.target.value;
+                        const terms = liquidationModal.record?.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms;
+                        const term = terms.find(t => t.id === selId || t.uuid === selId);
+                        const days = term?.days || 0;
+                        const calcDate = new Date();
+                        calcDate.setDate(calcDate.getDate() + days);
 
-                      // Usar extração local para evitar erro de fuso (UTC vs Brasil)
-                      const localDate = new Intl.DateTimeFormat('en-CA', {
-                        timeZone: 'America/Sao_Paulo',
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit'
-                      }).format(calcDate);
+                        const localDate = new Intl.DateTimeFormat('en-CA', {
+                          timeZone: 'America/Sao_Paulo',
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit'
+                        }).format(calcDate);
 
-                      setLiquidationModal({ ...liquidationModal, termId: selId, dueDate: localDate });
-                    }}
-                  >
-                    <option value="">SELECIONE O MEIO DE PAGAMENTO...</option>
-                    {(liquidationModal.record.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms).map(t => <option key={t.id} value={t.id || t.uuid}>{(t.name || '').toUpperCase()}</option>)}
-                  </select>
+                        setLiquidationModal({ ...liquidationModal, termId: selId, dueDate: localDate });
+                      }}
+                    >
+                      <option value="">SELECIONE O MEIO DE PAGAMENTO...</option>
+                      {(liquidationModal.record.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms).map(t => <option key={t.id} value={t.id || t.uuid}>{(t.name || '').toUpperCase()}</option>)}
+                    </select>
+                  </div>
+
+                  {(() => {
+                    const terms = liquidationModal.record?.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms;
+                    const selectedTerm = terms.find(t => t.id === liquidationModal.termId || t.uuid === liquidationModal.termId);
+                    const isCash = selectedTerm?.name?.toUpperCase().includes('DINHEIRO') || selectedTerm?.name?.toUpperCase() === 'À VISTA';
+
+                    if (isCash) {
+                      const received = parseNumericString(liquidationModal.receivedValue);
+                      const totalValue = liquidationModal.record?.valor || 0;
+                      const troco = Math.max(0, received - totalValue);
+
+                      return (
+                        <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Valor Recebido</label>
+                            <div className="relative">
+                              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-500 text-xs">R$</span>
+                              <input
+                                type="text"
+                                className="w-full bg-slate-950 border border-slate-800 p-4 pl-10 rounded-xl text-brand-success font-black text-xl outline-none focus:border-brand-success transition-all"
+                                placeholder="0,00"
+                                value={liquidationModal.receivedValue}
+                                onChange={e => setLiquidationModal({ ...liquidationModal, receivedValue: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Troco</label>
+                            <div className="relative">
+                              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-500 text-xs">R$</span>
+                              <div className="w-full bg-slate-900 border border-slate-800 p-4 pl-10 rounded-xl text-white font-black text-xl">
+                                {formatCurrency(troco)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  <div className="space-y-2">
+                    <label htmlFor="liquidation-dueDate" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Data do Pagamento / Vencimento</label>
+                    <input id="liquidation-dueDate" name="liquidation-dueDate" type="date" required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success shadow-inner" value={liquidationModal.dueDate} onChange={e => setLiquidationModal({ ...liquidationModal, dueDate: e.target.value })} />
+                  </div>
                 </div>
-                <button type="submit" disabled={isLiquidating} className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-success/20 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all">
+                <button type="submit" disabled={isLiquidating} className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-success/20 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all outline-none focus:ring-4 focus:ring-brand-success/30">
                   {isLiquidating ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
                   {isLiquidating ? 'Processando...' : 'Confirmar e Liquidar'}
                 </button>
@@ -3396,19 +3645,19 @@ const FinanceHub: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="wallet-valor" className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center block">Valor do Lançamento</label>
-                  <input id="wallet-valor" name="valor" required placeholder="0,00" autoComplete="off" className="w-full bg-slate-950 border border-slate-800 p-5 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-blue-400 transition-all shadow-inner" value={walletForm.valor} onChange={e => setWalletForm({ ...walletForm, valor: e.target.value })} />
+                  <input id="wallet-valor" name="valor" required placeholder="0,00" autoComplete="off" className="w-full bg-slate-950 border border-slate-800 p-5 rounded-2xl text-white font-black text-3xl text-center outline-none focus:border-blue-400 transition-all shadow-inner" value={walletForm.valor} onChange={e => setWalletForm({ ...walletForm, valor: e.target.value })} onKeyDown={handleWalletKeyDown} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label htmlFor="wallet-parceiro" className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Conta Bancária</label>
-                    <select id="wallet-parceiro" name="parceiro" required className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.parceiro} onChange={e => setWalletForm({ ...walletForm, parceiro: e.target.value })}>
+                    <select id="wallet-parceiro" name="parceiro" required className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.parceiro} onChange={e => setWalletForm({ ...walletForm, parceiro: e.target.value })} onKeyDown={handleWalletKeyDown}>
                       <option value="">BANCO / CONTA...</option>
                       {banks.map(b => <option key={b.id} value={b.id}>{b.name.toUpperCase()}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1">
                     <label htmlFor="wallet-paymentTermId" className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Meio de Pagamento</label>
-                    <select id="wallet-paymentTermId" name="payment_term_id" required className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.payment_term_id} onChange={e => setWalletForm({ ...walletForm, payment_term_id: e.target.value })}>
+                    <select id="wallet-paymentTermId" name="payment_term_id" required className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.payment_term_id} onChange={e => setWalletForm({ ...walletForm, payment_term_id: e.target.value })} onKeyDown={handleWalletKeyDown}>
                       <option value="">FORMA...</option>
                       {bankManualTerms.map(t => <option key={t.id} value={t.id || t.uuid}>{t.name.toUpperCase()}</option>)}
                     </select>
@@ -3416,14 +3665,14 @@ const FinanceHub: React.FC = () => {
                 </div>
                 <div className="space-y-1">
                   <label htmlFor="wallet-categoria" className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Classificação Categoria</label>
-                  <select id="wallet-categoria" name="categoria" required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.categoria} onChange={e => setWalletForm({ ...walletForm, categoria: e.target.value })}>
+                  <select id="wallet-categoria" name="categoria" required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs outline-none focus:border-blue-400" value={walletForm.categoria} onChange={e => setWalletForm({ ...walletForm, categoria: e.target.value })} onKeyDown={handleWalletKeyDown}>
                     <option value="">SELECIONE A CATEGORIA...</option>
                     {filteredWalletCategories.map(c => <option key={c.id} value={c.name}>{c.name.toUpperCase()}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label htmlFor="wallet-descricao" className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Descrição Operacional</label>
-                  <textarea id="wallet-descricao" name="descricao" placeholder="..." className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs resize-none outline-none focus:border-blue-400" rows={2} value={walletForm.descricao} onChange={e => setWalletForm({ ...walletForm, descricao: e.target.value })} />
+                  <textarea id="wallet-descricao" name="descricao" placeholder="..." className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs resize-none outline-none focus:border-blue-400" rows={2} value={walletForm.descricao} onChange={e => setWalletForm({ ...walletForm, descricao: e.target.value })} onKeyDown={handleWalletKeyDown} />
                 </div>
                 <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-sm tracking-widest shadow-xl shadow-blue-500/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3">
                   <CheckCircle2 size={20} />

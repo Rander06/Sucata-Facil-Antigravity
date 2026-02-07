@@ -839,7 +839,7 @@ const POS: React.FC = () => {
         parceiro: bank?.name || 'BANCO ORIGEM',
         payment_term_id: term.id || term.uuid || '',
         forma: term?.name || 'OUTROS',
-        descricao: `SAÍDA DE CONTA PARA FUNDO DE TROCO - TURNO ${session.id.slice(0, 6).toUpperCase()}`,
+        descricao: `TRANSFERÊNCIA P/ CAIXA PDV (FUNDO DE TROCO) - TURNO ${session.id.slice(0, 6).toUpperCase()}`,
         valor_entrada: 0,
         valor_saida: valorNum,
         saldo_real: lastBalance - valorNum,
@@ -926,20 +926,37 @@ const POS: React.FC = () => {
     if (isSubmitting || !paymentDefModal.record || !paymentDefModal.termId) return;
     setIsSubmitting(true);
     try {
+      console.log("[POS] Confirming payment for record:", paymentDefModal.record.id);
+
       const terms = [...purchasePaymentTerms, ...salePaymentTerms];
       const term = terms.find(t => t.id === paymentDefModal.termId || t.uuid === paymentDefModal.termId);
-      const isImmediate = term && term.days === 0;
+      const isImmediate = term && (term.days === 0 || term.name?.toUpperCase().includes('DINHEIRO') || term.name?.toUpperCase().includes('À VISTA'));
 
-      await db.update('financials', paymentDefModal.record.id, {
+      const updatePayload: any = {
         due_date: paymentDefModal.dueDate,
+        dueDate: paymentDefModal.dueDate,
         payment_term_id: paymentDefModal.termId,
+        paymentTermId: paymentDefModal.termId,
         status: isImmediate ? 'paid' : 'pending',
         liquidation_date: isImmediate ? db.getNowISO() : null,
-        caixa_id: activeSession ? activeSession.id : (paymentDefModal.record as any).caixa_id
-      });
+        liquidationDate: isImmediate ? db.getNowISO() : null,
+        caixa_id: activeSession ? activeSession.id : (paymentDefModal.record as any).caixa_id,
+        caixaId: activeSession ? activeSession.id : (paymentDefModal.record as any).caixa_id,
+        updated_at: db.getNowISO()
+      };
 
-      setPaymentDefModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' }); triggerRefresh();
-    } catch (err: any) { alert(err.message); } finally { setIsSubmitting(false); }
+      await db.update('financials', paymentDefModal.record.id, updatePayload);
+
+      console.log("[POS] Payment confirmation success for record:", paymentDefModal.record.id);
+
+      setPaymentDefModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' });
+      triggerRefresh();
+    } catch (err: any) {
+      console.error("[POS] Payment confirmation error:", err);
+      alert("Erro ao confirmar pagamento: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleManualEntrySubmit = (e: React.FormEvent) => {
@@ -1403,9 +1420,9 @@ const POS: React.FC = () => {
                 <thead><tr className="text-[10px] font-black text-slate-500 uppercase border-b border-slate-800 bg-slate-900/40"><th className="px-4 py-4">Horário</th><th className="px-4 py-4">Parceiro</th><th className="px-4 py-4">Lançamento</th><th className="px-4 py-4">Meio / Prazo</th><th className="px-4 py-4 text-right">Valor</th><th className="px-4 py-4 text-center">Status</th><th className="px-4 py-4 text-center">Ação</th></tr></thead>
                 <tbody className="divide-y divide-slate-800">
                   {historyRecords.map(rec => {
-                    const statusInfo = getStatusInfo(rec); const partner = partners.find(p => p.id === rec.parceiro_id);
-                    const terms = db.queryTenant<PaymentTerm>('paymentTerms', companyId, () => true);
-                    const term = terms.find(t => t.id === rec.paymentTermId || t.uuid === rec.paymentTermId || t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
+                    const statusInfo = getStatusInfo(rec);
+                    const partner = partners.find(p => p.id === rec.parceiro_id);
+                    const term = allTerms.find(t => t.id === rec.paymentTermId || t.uuid === rec.paymentTermId || t.id === rec.payment_term_id || t.uuid === rec.payment_term_id);
                     const isPendingAction = pendingRequests.some(r => r.status === 'PENDING' && r.action_label.includes(rec.id.slice(-5)));
                     const isThisRecordBeingEdited = editingRecordId === rec.id;
                     const displayDate = rec.liquidation_date ? new Date(rec.liquidation_date) : new Date(rec.created_at);
@@ -1736,7 +1753,25 @@ const POS: React.FC = () => {
               <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center gap-3"><CreditCard className="text-brand-success" /> Finalizar Operação</h2>
               <button onClick={() => setPaymentDefModal({ show: false, record: null, termId: '', dueDate: '', receivedValue: '' })}><X size={24} className="text-slate-500" /></button>
             </div>
-            <form onSubmit={handleConfirmPaymentDefinition} className="p-8 space-y-6">
+            <form
+              onSubmit={handleConfirmPaymentDefinition}
+              className="p-8 space-y-6"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const target = e.target as HTMLElement;
+                  if (target.tagName === 'INPUT' || target.tagName === 'SELECT') {
+                    e.preventDefault();
+                    const form = target.closest('form');
+                    if (!form) return;
+                    const elements = Array.from(form.querySelectorAll('input, select, button[type="submit"]')) as HTMLElement[];
+                    const index = elements.indexOf(target);
+                    if (index > -1 && index < elements.length - 1) {
+                      elements[index + 1].focus();
+                    }
+                  }
+                }
+              }}
+            >
               <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total do Pedido</p>
                 <p className="text-white font-black text-2xl">R$ {formatCurrency(paymentDefModal.record.valor)}</p>
@@ -1773,12 +1808,53 @@ const POS: React.FC = () => {
                     {(paymentDefModal.record.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms).map(t => <option key={t.id} value={t.id || t.uuid}>{t.name.toUpperCase()}</option>)}
                   </select>
                 </div>
+
+                {(() => {
+                  const terms = paymentDefModal.record?.natureza === 'SAIDA' ? purchasePaymentTerms : salePaymentTerms;
+                  const selectedTerm = terms.find(t => t.id === paymentDefModal.termId || t.uuid === paymentDefModal.termId);
+                  const isCash = selectedTerm?.name?.toUpperCase().includes('DINHEIRO') || selectedTerm?.name?.toUpperCase() === 'À VISTA';
+
+                  if (isCash) {
+                    const received = parseNumericString(paymentDefModal.receivedValue);
+                    const totalValue = paymentDefModal.record?.valor || 0;
+                    const troco = Math.max(0, received - totalValue);
+
+                    return (
+                      <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Valor Recebido</label>
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-500 text-xs">R$</span>
+                            <input
+                              type="text"
+                              className="w-full bg-slate-950 border border-slate-800 p-3 pl-10 rounded-xl text-brand-success font-black text-lg outline-none focus:border-brand-success transition-all"
+                              placeholder="0,00"
+                              value={paymentDefModal.receivedValue}
+                              onChange={e => setPaymentDefModal({ ...paymentDefModal, receivedValue: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Troco</label>
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-500 text-xs">R$</span>
+                            <div className="w-full bg-slate-900 border border-slate-800 p-3 pl-10 rounded-xl text-white font-black text-lg">
+                              {formatCurrency(troco)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 <div className="space-y-1">
                   <label htmlFor="payment-dueDate" className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Data do Pagamento / Vencimento</label>
                   <input id="payment-dueDate" name="payment-dueDate" type="date" required className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-white font-bold text-xs outline-none focus:border-brand-success" value={paymentDefModal.dueDate} onChange={e => setPaymentDefModal({ ...paymentDefModal, dueDate: e.target.value })} />
                 </div>
               </div>
-              <button type="submit" disabled={isSubmitting} className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-success/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3">
+              <button type="submit" disabled={isSubmitting} className="w-full py-5 bg-brand-success text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-brand-success/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-3 outline-none focus:ring-4 focus:ring-brand-success/30">
                 {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
                 Confirmar e Finalizar
               </button>

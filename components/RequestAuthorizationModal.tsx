@@ -73,7 +73,16 @@ Valor envolvido: ${val}`;
   };
 
   return (
-    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-300">
+    <div
+      className="fixed inset-0 z-[600] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-300"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !isDuplicate) {
+          e.preventDefault();
+          handleRequest();
+        }
+      }}
+      tabIndex={-1}
+    >
       <div className="enterprise-card w-full max-w-lg overflow-hidden shadow-2xl border-slate-700 animate-in zoom-in-95 duration-200">
         <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-brand-warning/5">
           <h2 className="text-lg font-black flex items-center gap-3 text-white uppercase tracking-widest"><Lock className="text-brand-warning" size={22} /> Controle de Segurança</h2>
@@ -97,8 +106,9 @@ Valor envolvido: ${val}`;
             </pre>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <button onClick={onClose} className="py-4 border border-slate-800 rounded-xl font-black text-[10px] uppercase tracking-widest text-slate-500 hover:bg-slate-800 hover:text-white transition-all">VOLTAR</button>
+            <button type="button" onClick={onClose} className="py-4 border border-slate-800 rounded-xl font-black text-[10px] uppercase tracking-widest text-slate-500 hover:bg-slate-800 hover:text-white transition-all">VOLTAR</button>
             <button
+              type="button"
               onClick={handleRequest}
               disabled={isDuplicate}
               className={`py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all ${isDuplicate

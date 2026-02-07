@@ -108,7 +108,7 @@ export const TableLayout = ({
                                                 )}
                                             </>
                                         )}
-                                        {record.status === 'paid' && onReverse && (
+                                        {record.status === 'paid' && onReverse && record.categoria?.toUpperCase().trim() !== 'ABERTURA DE CAIXA' && (
                                             <button
                                                 onClick={() => onReverse(record)}
                                                 className="p-2 rounded-lg text-brand-warning hover:bg-brand-warning/10 transition-all font-black uppercase text-[10px]"

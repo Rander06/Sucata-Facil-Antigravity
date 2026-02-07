@@ -232,63 +232,60 @@ Valor envolvido: ${val}`;
   };
 
   const filteredFinancials = useMemo(() => {
-    return financials.filter(f => {
-      const fDate = getBRDateOnly(f.created_at || '');
-      const matchDate = fDate >= dateStart && fDate <= dateEnd;
-      const partner = partners.find(p => p.id === f.parceiro_id);
-      const matchNatureza = !filters.natureza || (f.natureza || '').toUpperCase().includes(filters.natureza.toUpperCase());
-      const matchPartner = !filters.partner || (partner?.name || '').toLowerCase().includes(filters.partner.toLowerCase());
-      const matchStatus = !filters.status || getStatusInfo(f).label.toLowerCase().includes(filters.status.toLowerCase());
-      const matchDesc = !filters.description || (f.description || '').toLowerCase().includes(filters.description.toLowerCase());
-      if (activeModal === 'receivables_mirror') { if (f.categoria !== 'Venda de Materiais') return false; }
-      if (activeModal === 'payables_mirror') { if (f.categoria !== 'Compra de Materiais') return false; }
-      return matchDate && matchNatureza && matchPartner && matchStatus && matchDesc;
-    });
+    return financials
+      .filter(f => {
+        const fDate = getBRDateOnly(f.created_at || '');
+        const matchDate = fDate >= dateStart && fDate <= dateEnd;
+        if (!matchDate) return false;
+
+        const partner = partners.find(p => p.id === f.parceiro_id);
+        const statusInfo = getStatusInfo(f);
+
+        const matchNatureza = !filters.natureza || (f.natureza || '').toUpperCase().includes(filters.natureza.toUpperCase());
+        const matchPartner = !filters.partner || (partner?.name || '').toLowerCase().includes(filters.partner.toLowerCase());
+        const matchStatus = !filters.status || statusInfo.label.toLowerCase().includes(filters.status.toLowerCase());
+        const matchDesc = !filters.description || (f.description || '').toLowerCase().includes(filters.description.toLowerCase());
+
+        if (activeModal === 'receivables_mirror') { if (f.categoria !== 'Venda de Materiais') return false; }
+        if (activeModal === 'payables_mirror') { if (f.categoria !== 'Compra de Materiais') return false; }
+
+        return matchNatureza && matchPartner && matchStatus && matchDesc;
+      })
+      .map(f => {
+        const partner = partners.find(p => p.id === f.parceiro_id);
+        const statusInfo = getStatusInfo(f);
+        const term = paymentTerms.find(t => t.id === f.paymentTermId || t.uuid === f.paymentTermId || t.id === f.payment_term_id || t.uuid === f.payment_term_id);
+        const responsible = users.find(u => u.id === f.usuario_id || u.id === f.user_id || u.id === f.userId);
+
+        return {
+          ...f,
+          partnerName: partner?.name || 'CONSUMIDOR FINAL',
+          statusInfo,
+          termName: term?.name || (f.liquidation_date ? 'À VISTA' : 'PENDENTE'),
+          responsibleName: responsible?.name || 'Sistema'
+        };
+      });
   }, [financials, filters, dateStart, dateEnd, partners, activeModal]);
 
   const filteredLogs = useMemo(() => {
-    console.log('[Reports] Filtrando logs. Total carregado:', logs.length);
-    console.log('[Reports] Filtro de data:', { dateStart, dateEnd });
-    console.log('[Reports] Primeiros 3 logs (sample):', logs.slice(0, 3).map(l => ({
-      created_at: l.created_at,
-      timestamp: l.timestamp,
-      action: l.action,
-      user_name: l.user_name
-    })));
+    return logs
+      .filter(l => {
+        const lDate = getBRDateOnly(l.created_at || l.timestamp || '');
+        const matchDate = lDate >= dateStart && lDate <= dateEnd;
+        if (!matchDate) return false;
 
-    // Find logs from today specifically (using BR timezone)
-    const today = getTodayBR();
-    const logsFromToday = logs.filter(l => {
-      const lDate = getBRDateOnly(l.created_at || l.timestamp || '');
-      return lDate === today;
-    });
-    console.log(`[Reports] Logs de HOJE (${today}):`, logsFromToday.length);
-    if (logsFromToday.length > 0) {
-      console.log('[Reports] Exemplos de logs de hoje:', logsFromToday.slice(0, 3).map(l => ({
-        created_at: l.created_at,
-        extractedDate: getBRDateOnly(l.created_at || l.timestamp || ''),
-        action: l.action
-      })));
-    }
+        const matchUser = !filters.log_user || (l.user_name || '').toLowerCase().includes(filters.log_user.toLowerCase());
+        const matchAction = !filters.log_action || (l.action || '').toLowerCase().includes(filters.log_action.toLowerCase());
+        const matchDetail = !filters.log_detail || (l.details || '').toLowerCase().includes(filters.log_detail.toLowerCase());
 
-    const filtered = logs.filter(l => {
-      const lDate = getBRDateOnly(l.created_at || l.timestamp || '');
-      const matchDate = lDate >= dateStart && lDate <= dateEnd;
-      const matchUser = !filters.log_user || (l.user_name || '').toLowerCase().includes(filters.log_user.toLowerCase());
-      const matchAction = !filters.log_action || (l.action || '').toLowerCase().includes(filters.log_action.toLowerCase());
-      const matchDetail = !filters.log_detail || (l.details || '').toLowerCase().includes(filters.log_detail.toLowerCase());
-
-      // Log specifically for today's logs that don't match
-      if (lDate === today && !matchDate) {
-        console.log('[Reports] ⚠️ Log de HOJE filtrado:', { lDate, dateStart, dateEnd, matchDate, log: l });
-      }
-
-      return matchDate && matchUser && matchAction && matchDetail;
-    });
-
-    console.log('[Reports] Logs após filtro:', filtered.length);
-    console.log('[Reports] Logs de hoje após filtro:', filtered.filter(l => getBRDateOnly(l.created_at || l.timestamp || '') === today).length);
-    return filtered;
+        return matchUser && matchAction && matchDetail;
+      })
+      .map(log => ({
+        ...log,
+        formattedDate: new Date(log.created_at || log.timestamp || 0).toLocaleString('pt-BR'),
+        readableAction: getReadableAction(log.action),
+        readableDetails: getReadableDetails(log)
+      }));
   }, [logs, filters, dateStart, dateEnd]);
 
   const filteredMaterialsReport = useMemo(() => {
@@ -965,11 +962,8 @@ Valor envolvido: ${val}`;
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/50">
-                        {filteredFinancials.length === 0 ? (<tr><td colSpan={13} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum registro para o período</td></tr>) : filteredFinancials.map(f => {
-                          const partner = partners.find(p => p.id === f.parceiro_id);
-                          const term = paymentTerms.find(t => t.id === f.paymentTermId || t.uuid === f.paymentTermId || t.id === f.payment_term_id || t.uuid === f.payment_term_id);
-                          const responsible = users.find(u => u.id === f.usuario_id || u.id === f.user_id || u.id === f.userId);
-                          const statusInfo = getStatusInfo(f);
+                        {filteredFinancials.length === 0 ? (<tr><td colSpan={14} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum registro para o período</td></tr>) : (filteredFinancials as any[]).map(f => {
+                          const statusInfo = f.statusInfo;
                           return (
                             <tr key={f.id} className={`text-xs text-slate-300 hover:bg-slate-800/20 group transition-colors ${statusInfo.isStriked ? 'opacity-50 line-through grayscale' : ''}`}>
                               <td className="px-4 py-4 font-mono text-[9px] text-slate-500 w-[100px]">#{f.id.slice(0, 6).toUpperCase()}</td>
@@ -977,12 +971,12 @@ Valor envolvido: ${val}`;
                               <td className="px-4 py-4 font-bold text-slate-400 w-[140px]">{formatDate(f.dueDate || f.due_date)}</td>
                               <td className="px-4 py-4 w-[140px]">{f.liquidation_date ? (<div className="flex flex-col"><span className="font-black text-white">{formatDate(f.liquidation_date)}</span><span className="text-[10px] opacity-50 font-mono text-white">{formatTime(f.liquidation_date)}</span></div>) : <span className="text-slate-700 italic text-[10px] font-black">---</span>}</td>
                               <td className="px-4 py-4 w-[120px]"><div className="flex items-center gap-2">{f.natureza === 'ENTRADA' ? <ArrowUpCircle size={14} className="text-brand-success" /> : <ArrowDownCircle size={14} className="text-brand-error" />}<span className={`font-black text-[9px] ${f.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>{f.natureza}</span></div></td>
-                              <td className="px-4 py-4 truncate font-bold uppercase text-[10px] text-slate-200 w-[250px]">{partner?.name || 'CONSUMIDOR FINAL'}</td>
+                              <td className="px-4 py-4 truncate font-bold uppercase text-[10px] text-slate-200 w-[250px]">{f.partnerName}</td>
                               <td className="px-4 py-4 uppercase font-bold text-blue-400 truncate w-[180px] text-[10px]">{f.categoria}</td>
                               <td className="px-4 py-4 truncate text-[10px] text-slate-400 w-[300px] uppercase font-medium">{f.description || 'S/D'}</td>
-                              <td className="px-4 py-4 w-[180px]"><span className="text-[9px] font-black uppercase text-slate-400">{statusInfo.label === 'PENDENTE' ? 'PENDENTE' : (term?.name || (f.liquidation_date ? 'À VISTA' : 'PENDENTE'))}</span></td>
+                              <td className="px-4 py-4 w-[180px]"><span className="text-[9px] font-black uppercase text-slate-400">{f.termName}</span></td>
                               <td className={`px-4 py-4 text-right font-black w-[150px] text-sm ${f.natureza === 'ENTRADA' ? 'text-brand-success' : 'text-brand-error'}`}>R$ {formatCurrency(f.valor)}</td>
-                              <td className="px-4 py-4 truncate w-[180px] text-[10px] font-medium text-slate-400">{responsible?.name || 'Sistema'}</td>
+                              <td className="px-4 py-4 truncate w-[180px] text-[10px] font-medium text-slate-400">{f.responsibleName}</td>
                               <td className="px-4 py-4 text-center w-[120px]"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border shadow-sm ${statusInfo.color}`}>{statusInfo.label}</span></td>
                               <td className="px-4 py-4 text-center w-[100px]">{f.transaction_id && <button onClick={() => openTransactionDetails(f.transaction_id, f.parceiro_id)} className="p-1.5 bg-slate-800 hover:bg-blue-500/20 rounded transition-all text-blue-400 hover:text-white"><Eye size={14} /></button>}</td>
                             </tr>
@@ -1005,12 +999,12 @@ Valor envolvido: ${val}`;
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/50">
-                        {filteredLogs.length === 0 ? (<tr><td colSpan={4} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum log localizado</td></tr>) : filteredLogs.map(log => (
+                        {filteredLogs.length === 0 ? (<tr><td colSpan={4} className="py-20 text-center text-slate-600 font-bold uppercase tracking-widest">Nenhum log localizado</td></tr>) : (filteredLogs as any[]).map(log => (
                           <tr key={log.id} className="hover:bg-slate-800/20 transition-colors text-[10px] font-medium">
-                            <td className="px-4 py-4 font-mono text-slate-500 w-[180px]">{new Date(log.created_at || log.timestamp || 0).toLocaleString('pt-BR')}</td>
+                            <td className="px-4 py-4 font-mono text-slate-500 w-[180px]">{log.formattedDate}</td>
                             <td className="px-4 py-4 font-black text-slate-200 uppercase truncate w-[220px]">{log.user_name || 'SISTEMA'}</td>
-                            <td className="px-4 py-4 w-[200px]"><span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[8px] font-black uppercase text-brand-success shadow-sm">{getReadableAction(log.action)}</span></td>
-                            <td className="px-4 py-4 text-slate-400 leading-relaxed whitespace-pre-wrap font-sans w-[900px]">{getReadableDetails(log)}</td>
+                            <td className="px-4 py-4 w-[200px]"><span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[8px] font-black uppercase text-brand-success shadow-sm">{log.readableAction}</span></td>
+                            <td className="px-4 py-4 text-slate-400 leading-relaxed whitespace-pre-wrap font-sans w-[900px]">{log.readableDetails}</td>
                           </tr>
                         ))}
                       </tbody>

@@ -8,8 +8,8 @@ const Login: React.FC = () => {
   const { setCurrentUser, isCloudEnabled, isSyncing } = useAppContext();
   const [mode, setMode] = useState<'login' | 'register' | 'invite'>('login');
 
-  const [email, setEmail] = useState('admin@sucatafacil.com');
-  const [password, setPassword] = useState('Mr748197/');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -422,19 +422,19 @@ const Login: React.FC = () => {
             </div>
 
             <div className="enterprise-card p-8 border-slate-800 shadow-2xl">
-              <form onSubmit={handleLogin} className="space-y-6" autoComplete="off">
+              <form onSubmit={handleLogin} className="space-y-6" autoComplete="on">
                 <div className="space-y-2">
                   <label htmlFor="email" className="text-sm font-semibold text-slate-400">Identificador de Acesso</label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                    <input id="email" name="email" type="email" autoComplete="off" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={email} onChange={e => setEmail(e.target.value)} />
+                    <input id="email" name="email" type="email" autoComplete="username" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={email} onChange={e => setEmail(e.target.value)} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label htmlFor="password" className="text-sm font-semibold text-slate-400">Senha</label>
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                    <input id="password" name="password" type="password" autoComplete="new-password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={password} onChange={e => setPassword(e.target.value)} />
+                    <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-12 pr-4 text-white outline-none focus:ring-1 focus:ring-brand-success transition-all font-medium" value={password} onChange={e => setPassword(e.target.value)} />
                   </div>
                 </div>
                 {error && (

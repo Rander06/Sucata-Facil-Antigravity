@@ -153,13 +153,13 @@ Valor envolvido: ${val}`;
       <div className="enterprise-card w-full max-w-3xl overflow-hidden shadow-2xl border-slate-700">
         <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-brand-success/5">
           <h2 className="text-lg font-black flex items-center gap-3 text-white uppercase tracking-widest"><ShieldCheck className="text-brand-success" size={24} /> Centro de Revisão Remota</h2>
-          <button onClick={handleClose} className="p-2 text-slate-500 hover:text-white transition-colors"><X size={28} /></button>
+          <button type="button" onClick={handleClose} className="p-2 text-slate-500 hover:text-white transition-colors"><X size={28} /></button>
         </div>
         <div className="flex flex-col md:flex-row h-[580px]">
           <div className="w-full md:w-64 border-r border-slate-800 bg-slate-900/30 overflow-y-auto custom-scrollbar">
             <div className="p-4 border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest">Fila de Revisão</div>
             {actualPendingRequests.map(req => (
-              <button key={req.id} onClick={() => { setSelectedRequest(req); setError(''); }} className={`w-full p-4 border-b border-slate-800 text-left transition-all ${selectedRequest?.id === req.id ? 'bg-brand-success/10 text-brand-success border-r-4 border-r-brand-success' : 'text-slate-400 hover:bg-slate-800'}`}>
+              <button key={req.id} type="button" onClick={() => { setSelectedRequest(req); setError(''); }} className={`w-full p-4 border-b border-slate-800 text-left transition-all ${selectedRequest?.id === req.id ? 'bg-brand-success/10 text-brand-success border-r-4 border-r-brand-success' : 'text-slate-400 hover:bg-slate-800'}`}>
                 <div className="flex justify-between items-center mb-1">
                   <p className="text-[10px] font-black uppercase truncate">{req.action_key.replace(/_/g, ' ')}</p>
                   <span className="text-[8px] font-black bg-slate-950 px-1.5 py-0.5 rounded text-brand-success border border-brand-success/20">{req.protocol_id}</span>
@@ -176,7 +176,27 @@ Valor envolvido: ${val}`;
           </div>
           <div className="flex-1 bg-brand-dark p-8 flex flex-col justify-between overflow-hidden">
             {selectedRequest ? (
-              <div className="space-y-8 animate-in fade-in slide-in-from-right-2 overflow-y-auto custom-scrollbar pr-2">
+              <form
+                onSubmit={(e) => { e.preventDefault(); handleApprove(); }}
+                className="space-y-8 animate-in fade-in slide-in-from-right-2 overflow-y-auto custom-scrollbar pr-2"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const target = e.target as HTMLElement;
+                    // Se estiver no select, pula para o password
+                    if (target.tagName === 'SELECT') {
+                      e.preventDefault();
+                      passwordRef.current?.focus();
+                    }
+                    // Se estiver no input de senha, força a aprovação
+                    else if (target === passwordRef.current) {
+                      e.preventDefault();
+                      if (!isProcessing && email && password) {
+                        handleApprove();
+                      }
+                    }
+                  }
+                }}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-inner flex-1 mr-4">
                     <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-brand-success border border-slate-700"><UserIcon size={24} /></div>
@@ -205,7 +225,6 @@ Valor envolvido: ${val}`;
                       value={email}
                       onChange={e => {
                         setEmail(e.target.value);
-                        // Ao selecionar um usuário, foca automaticamente na senha
                         if (e.target.value) {
                           setTimeout(() => passwordRef.current?.focus(), 100);
                         }
@@ -218,6 +237,16 @@ Valor envolvido: ${val}`;
                         </option>
                       ))}
                     </select>
+                    {/* Username field for accessibility and password managers (visually hidden) */}
+                    <input
+                      type="text"
+                      name="username"
+                      autoComplete="username"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      className="sr-only"
+                      tabIndex={-1}
+                    />
                     <input
                       ref={passwordRef}
                       type="password"
@@ -225,8 +254,7 @@ Valor envolvido: ${val}`;
                       className="w-full bg-slate-900 border border-slate-800 p-4 rounded-xl text-white font-bold text-xs focus:border-brand-success outline-none transition-all"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleApprove()}
-                      autoComplete="new-password"
+                      autoComplete="current-password"
                     />
                   </div>
                   {error && (
@@ -236,14 +264,14 @@ Valor envolvido: ${val}`;
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <button onClick={handleDeny} disabled={isProcessing} className="py-4 border border-slate-800 rounded-xl font-black text-[10px] text-brand-error uppercase tracking-widest hover:bg-brand-error/10 transition-all disabled:opacity-50">RECUSAR AÇÃO</button>
-                  <button onClick={handleApprove} disabled={isProcessing || !email || !password} className="py-4 bg-brand-success text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-brand-success/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                <div className="flex flex-row-reverse gap-4 pt-2">
+                  <button type="submit" disabled={isProcessing || !email || !password} className="flex-1 py-4 bg-brand-success text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-brand-success/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
                     {isProcessing ? <Loader2 className="animate-spin" size={14} /> : <ShieldCheck size={14} />}
                     {isProcessing ? 'PROCESSANDO...' : 'LIBERAR AGORA'}
                   </button>
+                  <button type="button" onClick={handleDeny} disabled={isProcessing} className="flex-1 py-4 border border-slate-800 rounded-xl font-black text-[10px] text-brand-error uppercase tracking-widest hover:bg-brand-error/10 transition-all disabled:opacity-50">RECUSAR AÇÃO</button>
                 </div>
-              </div>
+              </form>
             ) : (
               <div className="h-full flex flex-col items-center justify-center opacity-20 text-center px-8">
                 <UserCheck size={80} className="mb-6" />

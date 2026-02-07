@@ -24,6 +24,7 @@ interface DBState {
 }
 
 let supabaseInstance: any = null;
+let memoryState: DBState | null = null;
 
 const generateId = () => {
   return generateUUID();
@@ -140,22 +141,22 @@ const NOMENCLATURE_MAP: Record<string, string> = {
 };
 
 const TABLE_COLUMNS: Record<string, string[]> = {
-  users: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'remote_authorizations', 'created_at'],
-  profiles: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'remote_authorizations', 'created_at'],
+  users: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'remote_authorizations', 'created_at', 'updated_at', 'last_login', 'last_logout'],
+  profiles: ['id', 'email', 'name', 'role', 'profile', 'company_id', 'permissions', 'remote_authorizations', 'created_at', 'updated_at', 'last_login', 'last_logout'],
   financials: ['id', 'company_id', 'user_id', 'tipo', 'natureza', 'categoria', 'valor', 'status', 'description', 'due_date', 'parceiro_id', 'transaction_id', 'caixa_id', 'payment_term_id', 'liquidation_date', 'forma_pagamento', 'created_at', 'updated_at'],
   transactions: ['id', 'company_id', 'user_id', 'valor', 'status', 'natureza', 'tipo', 'items', 'created_at'],
   materials: ['id', 'company_id', 'name', 'unit', 'stock', 'min_stock', 'max_stock', 'buy_price', 'sell_price', 'created_at', 'updated_at'],
   cashierSessions: ['id', 'company_id', 'user_id', 'user_name', 'type', 'status', 'opening_balance', 'closing_balance', 'expected_balance', 'auditoria_corrigida', 'difference', 'opening_time', 'closing_time', 'reconciled_at', 'reconciled_by_id', 'reconciled_by_name', 'physical_breakdown', 'reconciled_breakdown', 'created_at', 'updated_at'],
   walletTransactions: ['id', 'company_id', 'user_id', 'id_original', 'categoria', 'parceiro', 'payment_term_id', 'descricao', 'valor_entrada', 'valor_saida', 'saldo_real', 'status', 'operador_id', 'operador_name', 'created_at', 'updated_at'],
-  partners: ['id', 'company_id', 'name', 'type', 'document', 'phone', 'created_at'],
+  partners: ['id', 'company_id', 'name', 'type', 'document', 'phone', 'created_at', 'updated_at'],
   paymentTerms: ['id', 'uuid', 'company_id', 'user_id', 'name', 'days', 'installments', 'type', 'show_in_sale', 'show_in_purchase', 'show_in_settle', 'show_in_bank_manual', 'show_in_pdv_manual', 'show_in_manual_pdv', 'show_in_cashier_close', 'show_in_opening', 'show_in_title_launch', 'is_default', 'created_at', 'updated_at'],
   financeCategories: ['id', 'company_id', 'user_id', 'name', 'type', 'is_default', 'show_in_sales', 'show_in_purchases', 'show_in_liquidation', 'show_in_bank_manual', 'show_in_pdv_manual', 'show_in_title_launch', 'created_at', 'updated_at'],
   banks: ['id', 'company_id', 'user_id', 'name', 'code', 'agency', 'account', 'status', 'is_default', 'created_at', 'updated_at'],
-  logs: ['id', 'company_id', 'user_id', 'user_name', 'action', 'details', 'created_at'],
+  logs: ['id', 'company_id', 'user_id', 'user_name', 'action', 'details', 'created_at', 'updated_at'],
   invites: ['id', 'company_id', 'user_id', 'code', 'name', 'email', 'profile', 'permissions', 'remote_authorizations', 'status', 'created_by', 'created_at', 'updated_at'],
-  companies: ['id', 'name', 'cnpj', 'plan_id', 'status', 'expires_at', 'created_at'],
-  plans: ['id', 'name', 'price', 'max_users', 'modules', 'billing_cycle', 'is_active', 'created_at'],
-  authorization_requests: ['id', 'company_id', 'action_key', 'action_label', 'action_payload', 'requested_by_id', 'requested_by_name', 'protocol_id', 'approval_code', 'status', 'created_at', 'responded_at', 'responded_by_id', 'responded_by_name']
+  companies: ['id', 'name', 'cnpj', 'plan_id', 'status', 'expires_at', 'created_at', 'updated_at'],
+  plans: ['id', 'name', 'price', 'max_users', 'modules', 'billing_cycle', 'is_active', 'created_at', 'updated_at'],
+  authorization_requests: ['id', 'company_id', 'action_key', 'action_label', 'action_payload', 'requested_by_id', 'requested_by_name', 'protocol_id', 'approval_code', 'status', 'created_at', 'responded_at', 'responded_by_id', 'responded_by_name', 'updated_at']
 };
 
 const applyRedundancy = (obj: any) => {
@@ -189,17 +190,6 @@ const applyRedundancy = (obj: any) => {
 const prepareForCloud = (obj: any, tableKey: string) => {
   if (!obj || typeof obj !== 'object') return obj;
 
-  // BYPASS: Para 'users', enviamos o objeto filtrado pela whitelist (TABLE_COLUMNS) 
-  // para evitar erro de coluna inexistente (ex: camelCase) mas permitir arrays
-  if (['users', 'profiles'].includes(tableKey)) {
-    const clean: any = {};
-    const validCols = TABLE_COLUMNS[tableKey] || [];
-    validCols.forEach(k => {
-      if (obj[k] !== undefined) clean[k] = obj[k];
-    });
-    return clean;
-  }
-
   const cloudObj: any = {};
   const source = applyRedundancy(obj);
   const allowedColumns = TABLE_COLUMNS[tableKey] || [];
@@ -211,8 +201,13 @@ const prepareForCloud = (obj: any, tableKey: string) => {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  const numericFields = ['opening_balance', 'closing_balance', 'expected_balance', 'auditoria_corrigida', 'difference', 'valor', 'valor_entrada', 'valor_saida', 'saldo_real', 'stock', 'buy_price', 'sell_price', 'price', 'max_users'];
+  const numericFields = [
+    'opening_balance', 'closing_balance', 'expected_balance', 'auditoria_corrigida',
+    'difference', 'valor', 'valor_entrada', 'valor_saida', 'saldo_real',
+    'stock', 'buy_price', 'sell_price', 'price', 'max_users'
+  ];
 
+  // Whitelist Estrita: Apenas o que está em TABLE_COLUMNS entra no payload
   allowedColumns.forEach(col => {
     if (source[col] !== undefined) {
       if (['id', 'payment_term_id', 'requested_by_id', 'responded_by_id', 'user_id', 'company_id', 'plan_id', 'caixa_id', 'transaction_id', 'parceiro_id'].includes(col)) {
@@ -245,65 +240,122 @@ export const db = {
     return !!supabaseInstance;
   },
 
-  syncFromCloud: async () => {
+  syncFromCloud: async (companyId?: string | null) => {
     if (localStorage.getItem('sf_restore_lock') === 'true') return true;
     const client = db.getCloudClient();
     if (!client) return false;
+
     try {
       const downloadedData: Record<string, any[]> = {};
       const syncTables = ['materials', 'partners', 'financials', 'transactions', 'cashierSessions', 'walletTransactions', 'banks', 'logs', 'invites', 'companies', 'plans', 'users', 'paymentTerms', 'financeCategories', 'authorization_requests'];
 
-      // 1. Download all tables into temporary memory buffer
+      // PERFORMANCE SaaS: Busca apenas o que mudou desde o último sincronismo (Delta Sync)
+      // Se não houver companyId, sincronizamos apenas tabelas globais ou nada (depende do RLS)
+      const freshState = db.get();
+
       for (const tableKey of syncTables) {
         const cloudTable = TABLE_MAP[tableKey];
         if (!cloudTable) continue;
 
-        const { data, error } = await client.from(cloudTable).select('*');
+        const tableItems = (freshState as any)[tableKey] || [];
+        const isTableEmpty = tableItems.length === 0;
+        const isGlobalTable = ['plans', 'companies'].includes(tableKey);
+
+        // Se a tabela local estiver vazia, forçamos um sincronismo completo (Delta Sync = 1970)
+        const lastSync = (isTableEmpty || isGlobalTable)
+          ? '1970-01-01T00:00:00.000Z'
+          : (localStorage.getItem(`last_sync_${tableKey}`) || '1970-01-01T00:00:00.000Z');
+
+        let query = client.from(cloudTable).select('*');
+
+        if (!isGlobalTable && companyId) {
+          if (tableKey === 'users' && companyId === '1b8967ab-fb43-452d-8061-afc03bd3e15e') {
+            // Admin Mestre sincroniza todos os perfis do banco para gestão total
+            console.log('[SYNC] Sincronizando todos os perfis (Master Mode)');
+          } else {
+            query = query.eq('company_id', companyId);
+          }
+        }
+
+        // Tenta filtrar por updated_at, se falhar (400), tenta sem filtro (fallback para tabelas legadas)
+        const { data, error } = await query.gt('updated_at', lastSync);
+
         if (!error && data) {
           downloadedData[tableKey] = data.map(applyRedundancy);
+          if (data.length > 0) {
+            const newestDate = data.reduce((max: string, curr: any) => {
+              const currDate = curr.updated_at || curr.created_at || max;
+              return (currDate > max) ? currDate : max;
+            }, lastSync);
+            localStorage.setItem(`last_sync_${tableKey}`, newestDate);
+          }
+        } else if (error) {
+          console.warn(`[SYNC_WARNING] Falha no Delta Sync para ${cloudTable} (Tabela legada ou sem updated_at). Tentando fetch completo.`, error);
+
+          let fullQuery = client.from(cloudTable).select('*');
+          if (!isGlobalTable && companyId) {
+            // Aplica a mesma lógica de permissão do query original no fallback
+            const isUserMaster = tableKey === 'users' && companyId === '1b8967ab-fb43-452d-8061-afc03bd3e15e';
+            if (!isUserMaster) {
+              fullQuery = fullQuery.eq('company_id', companyId);
+            }
+          }
+
+          const { data: fullData, error: fullError } = await fullQuery;
+          if (!fullError && fullData) {
+            downloadedData[tableKey] = fullData.map(applyRedundancy);
+          }
         }
       }
 
-      // 2. ATOMIC UPDATE: Read fresh state, merge, and save immediately
-      const freshState = db.get();
-
       for (const tableKey of syncTables) {
+        const cloudTable = TABLE_MAP[tableKey];
+        if (!cloudTable) continue;
+
+        // Merge inteligente: Cloud sempre vence para garantir integridade multi-tenant
         const normalizedCloud = downloadedData[tableKey];
         if (!normalizedCloud) continue;
 
+        const localItems = [...((freshState as any)[tableKey] || [])];
+
         if (tableKey === 'users') {
-          const currentUsers = (freshState as any).users || [];
-          (freshState as any).users = normalizedCloud.map((cloudUser: any) => {
-            const localUser = currentUsers.find((u: any) => u.id === cloudUser.id);
-            if (localUser) {
+          // Lógica especial para usuários (preservar timestamps de login e integridade)
+          const mergedUsers = [...localItems];
+          normalizedCloud.forEach((cloudUser: any) => {
+            const idx = mergedUsers.findIndex((u: any) => u.id === cloudUser.id);
+            if (idx > -1) {
+              const localUser = mergedUsers[idx];
               const localUpdated = localUser.updated_at ? new Date(localUser.updated_at).getTime() : 0;
               const cloudUpdated = cloudUser.updated_at ? new Date(cloudUser.updated_at).getTime() : 0;
-              const isLocalRecent = (Date.now() - localUpdated) < 300000;
-              if (localUpdated >= cloudUpdated || isLocalRecent) {
-                return { ...cloudUser, updated_at: localUser.updated_at, last_login: localUser.last_login, last_logout: (localUser.last_logout && new Date(localUser.last_logout).getTime() > (cloudUser.last_logout ? new Date(cloudUser.last_logout).getTime() : 0)) ? localUser.last_logout : cloudUser.last_logout };
-              }
+              // Cloud vence se for mais recente, mas preservamos campos locais se necessário
+              mergedUsers[idx] = (localUpdated >= cloudUpdated) ? { ...cloudUser, ...localUser } : { ...localUser, ...cloudUser };
+            } else {
+              mergedUsers.push(cloudUser);
             }
-            return cloudUser;
           });
+          (freshState as any).users = mergedUsers;
         } else {
-          const cloudIds = new Set(normalizedCloud.map((it: any) => it.id));
-          const localItems = (freshState as any)[tableKey] || [];
-
-          const recentUnsyncedLocal = localItems.filter((localIt: any) => {
-            if (cloudIds.has(localIt.id)) return false;
-            const createdAt = localIt.created_at ? new Date(localIt.created_at).getTime() : 0;
-            const updatedAt = localIt.updated_at ? new Date(localIt.updated_at).getTime() : 0;
-            const latest = Math.max(createdAt, updatedAt);
-            return (Date.now() - latest) < 60000; // 60s window
+          // No Delta Sync, atualizamos apenas o que veio da nuvem, mantendo o que já tínhamos localmente
+          const merged = [...localItems];
+          normalizedCloud.forEach((cloudIt: any) => {
+            const idx = merged.findIndex((li: any) => li.id === cloudIt.id);
+            if (idx > -1) {
+              // Se já existe, atualiza
+              merged[idx] = cloudIt;
+            } else {
+              // Se é novo, adiciona
+              merged.push(cloudIt);
+            }
           });
 
-          (freshState as any)[tableKey] = [...normalizedCloud, ...recentUnsyncedLocal];
+          (freshState as any)[tableKey] = merged;
         }
       }
 
       db.save(freshState);
       return true;
     } catch (err) {
+      console.error("[SYNC_ERROR]", err);
       return false;
     }
   },
@@ -312,7 +364,7 @@ export const db = {
     const client = db.getCloudClient();
     if (!client) return false;
     const state = db.get();
-    const tablesToPush = ['materials', 'partners', 'paymentTerms', 'financeCategories', 'financials', 'transactions', 'cashierSessions', 'walletTransactions', 'banks', 'logs', 'invites', 'plans', 'authorization_requests', 'users', 'companies'];
+    const tablesToPush = ['materials', 'partners', 'paymentTerms', 'financeCategories', 'financials', 'transactions', 'cashierSessions', 'walletTransactions', 'banks', 'invites', 'plans', 'authorization_requests', 'users', 'companies'];
 
     let allSuccess = true;
     for (const tableKey of tablesToPush) {
@@ -333,11 +385,16 @@ export const db = {
   },
 
   get: (): DBState => {
+    if (memoryState) return memoryState;
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : getInitialState();
+    memoryState = data ? JSON.parse(data) : getInitialState();
+    return memoryState!;
   },
 
-  save: (state: DBState) => localStorage.setItem(STORAGE_KEY, JSON.stringify(state)),
+  save: (state: DBState) => {
+    memoryState = state;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  },
 
   restoreState: async (newState: DBState) => {
     db.save(newState);
@@ -359,9 +416,16 @@ export const db = {
 
     return normalizedItems.filter(item => {
       const itemCid = String(item.company_id || item.companyId || '').trim();
+
+      // Bypass total para usuários do Super Admin
+      if (table === 'users') {
+        if (item.role === UserRole.SUPER_ADMIN || item.profile === OperationalProfile.MASTER) return true;
+      }
+
       if (!targetCid || targetCid === 'null' || targetCid === 'undefined' || targetCid === '') {
         return filter ? filter(item as unknown as T) : true;
       }
+
       const match = itemCid === targetCid;
       return filter ? (match && filter(item as unknown as T)) : match;
     });
@@ -528,7 +592,10 @@ export const db = {
   update: async <T>(table: keyof DBState, id: string, updates: any): Promise<T> => {
     const data = db.get();
     const index = (data[table] as any[]).findIndex(item => item.id === id);
-    if (index === -1) throw new Error(`Item ${id} not found`);
+    if (index === -1) {
+      console.warn(`[DB_UPDATE] Item ${id} not found in table ${table as string}. Sync might be pending.`);
+      return null as any;
+    }
 
     const normalizedUpdates = applyRedundancy(updates);
     data[table][index] = applyRedundancy({ ...data[table][index], ...normalizedUpdates, updated_at: getBrNow() });
@@ -657,15 +724,15 @@ export const db = {
 
     // Debounce to avoid multiple triggers for a single batch of updates
     let debounceTimer: any = null;
-    const debouncedUpdate = () => {
+    const debouncedUpdate = (cid?: string | null) => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         // Verifica se o cliente ainda existe antes de tentar sincronizar
         const activeClient = db.getCloudClient();
         if (!activeClient) return;
 
-        console.log('[REALTIME] Change detected, syncing...');
-        db.syncFromCloud().then((success) => {
+        console.log(`[REALTIME] Change detected${cid ? ' for company ' + cid : ''}, syncing...`);
+        db.syncFromCloud(cid).then((success) => {
           if (success) {
             console.log('[REALTIME] Sync completed, updating UI.');
             onUpdate();
@@ -674,13 +741,24 @@ export const db = {
       }, 300); // 300ms debounce
     };
 
-    const tables = ['materials', 'financials', 'transactions', 'partners', 'cashier_sessions', 'authorization_requests'];
+    const tables = ['materials', 'financials', 'transactions', 'partners', 'cashier_sessions', 'authorization_requests', 'wallet_transactions', 'banks', 'payment_terms', 'finance_categories', 'profiles'];
     const channel = client.channel('db_changes_global');
 
     tables.forEach(table => {
       channel.on('postgres_changes', { event: '*', schema: 'public', table: table }, (payload) => {
         console.log(`[REALTIME] Update received for ${table}`, payload);
-        debouncedUpdate();
+
+        // Tenta recuperar o companyId do usuário logado para um sync mais preciso
+        const userStr = localStorage.getItem('auth_user');
+        let cid = null;
+        if (userStr) {
+          try {
+            const u = JSON.parse(userStr);
+            cid = u.company_id || u.companyId;
+          } catch (e) { }
+        }
+
+        debouncedUpdate(cid);
       });
     });
 

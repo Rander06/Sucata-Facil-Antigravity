@@ -63,13 +63,13 @@ const AppContent: React.FC = () => {
         ) {
           e.preventDefault();
 
-          // Find all visible and enabled focusable elements in the document
+          // Find all focusable elements
           const focusable = Array.from(
-            document.querySelectorAll('input, select, button, [tabindex]:not([tabindex="-1"])')
+            document.querySelectorAll('input:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])')
           ).filter(el => {
-            if (!(el instanceof HTMLElement) || el.hasAttribute('disabled')) return false;
-            const style = window.getComputedStyle(el);
-            return style.display !== 'none' && style.visibility !== 'hidden';
+            if (!(el instanceof HTMLElement)) return false;
+            // Faster check for visibility than getComputedStyle
+            return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
           }) as HTMLElement[];
 
           const index = focusable.indexOf(target);
